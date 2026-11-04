@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<style>
+@font-face{font-family:"LXGW WenKai";src:url("../assets/fonts/wenkai-regular.woff2") format("woff2");font-weight:300 599}
+@font-face{font-family:"LXGW WenKai";src:url("../assets/fonts/wenkai-medium.woff2") format("woff2");font-weight:600 900}
+*{box-sizing:border-box;margin:0}
+body{width:900px;background:#e5e4dc;font-family:"LXGW WenKai","Microsoft YaHei",sans-serif;color:#2a3138;padding:34px 30px}
+.sheet{background:#f1f0ea;border:2px solid #2a3138;border-radius:6px;padding:34px 36px 26px;box-shadow:8px 8px 0 rgba(84,92,88,.25);position:relative;overflow:hidden}
+.sheet::before{content:"";position:absolute;inset:0;background-image:repeating-linear-gradient(0deg,transparent 0 30px,rgba(51,62,72,.06) 30px 31px);pointer-events:none}
+.tag{display:inline-block;font-size:12px;letter-spacing:.28em;color:#f8f8f4;background:#333e48;padding:5px 14px;border-radius:3px;font-weight:700;position:relative}
+h1{font-size:44px;letter-spacing:-.01em;margin:14px 0 6px;line-height:1.25;position:relative}
+h1 em{font-style:normal;color:#d96f1f}
+.sub{font-size:15.5px;color:#4d565e;line-height:1.8;margin-bottom:20px;position:relative}
+.hero-card{position:relative;background:#faf9f3;border:1.5px solid #b7b5a6;border-left:5px solid #d96f1f;border-radius:4px;padding:15px 18px;display:flex;gap:16px;align-items:center;box-shadow:3px 3px 0 rgba(84,92,88,.16)}
+.hero-card b{font-size:17px;display:block;margin-bottom:3px}
+.hero-card p{font-size:12.8px;color:#7b8288;line-height:1.7}
+.hero-num{flex:0 0 auto;font-family:Consolas,monospace;font-size:30px;font-weight:700;color:#25303a;background:#e9efec;border:1px solid rgba(51,62,72,.35);border-radius:4px;padding:8px 14px;text-align:center;line-height:1.15}
+.hero-num small{display:block;font-size:10px;color:#7b8288;font-weight:400;letter-spacing:.1em}
+.flow{display:flex;justify-content:center;gap:0;margin:16px 0 18px;position:relative}
+.flow span{font-family:Consolas,monospace;font-size:12px;color:#25303a;background:#faf9f3;border:1.5px dashed rgba(51,62,72,.45);padding:6px 12px;border-radius:3px}
+.flow i{align-self:center;color:#d96f1f;font-style:normal;padding:0 8px;font-size:14px}
+.grid{position:relative;display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.card{background:#faf9f3;border:1.5px solid #b7b5a6;border-radius:4px;padding:14px 16px;box-shadow:3px 3px 0 rgba(84,92,88,.14)}
+.card h3{font-size:16px;display:flex;align-items:center;gap:9px;margin-bottom:8px}
+.card h3 i{font-style:normal;font-family:Consolas,monospace;font-size:12px;color:#f8f8f4;border-radius:3px;padding:3px 8px;letter-spacing:.08em}
+.card p{font-size:12.6px;color:#4d565e;line-height:1.78}
+.card p b{color:#1d2429}
+.c1 h3 i{background:#333e48}.c2 h3 i{background:#a8842c}.c3 h3 i{background:#3f8f5f}
+.c4 h3 i{background:#5d6d74}.c5 h3 i{background:#77588a}.c6 h3 i{background:#d96f1f}
+.bars{margin-top:14px;position:relative;background:#faf9f3;border:1.5px solid #2a3138;border-radius:4px;padding:12px 18px;display:flex;justify-content:space-between;align-items:center;box-shadow:3px 3px 0 rgba(84,92,88,.2)}
+.bars b{font-size:13.5px}
+.bars small{display:block;font-size:11px;color:#7b8288;margin-top:2px}
+.pill{font-family:Consolas,monospace;font-size:11px;color:#25303a;border:1px solid rgba(51,62,72,.45);padding:4px 10px;border-radius:2px;background:#e9efec;margin:3px 0 3px 6px;white-space:nowrap}
+.bars>div:last-child{display:flex;flex-wrap:wrap;justify-content:flex-end;max-width:300px}
+.foot{margin-top:14px;text-align:center;font-size:11px;color:#a6a89f;letter-spacing:.12em}
+</style>
+</head>
+<body>
+<div class="sheet">
+  <span class="tag">造物手记 VOL.12 · 2026.11</span>
+  <h1>住进机房<em>的 Agent</em></h1>
+  <p class="sub">一台全本机巡检 Agent 的解剖：规则决定事实、AI 只负责说话——五种拨测、手写 DNS 栈、滞后与衰减的告警力学、批准不等于执行的提案门。</p>
+  <div class="hero-card">
+    <div class="hero-num">7+4<small>章 + 小样</small></div>
+    <div>
+      <b>解剖标本：hermes-watch（本机自研 · backend/app 24 模块 6799 行）</b>
+      <p>rules.py 确定性规则引擎 · probes.py 五类拨测（纯 stdlib DNS 栈）· analysis.py 根因卡 · executor.py 提案白名单；本文所有引文核对到真实函数与注释，只读解剖未运行其巡检循环。</p>
+    </div>
+  </div>
+  <div class="flow"><span>SSH 只读采集</span><i>→</i><span>rules 事实</span><i>→</i><span>拨测独立域</span><i>→</i><span>深挖证据</span><i>→</i><span>根因卡</span><i>→</i><span>提案白名单</span></div>
+  <div class="grid">
+    <div class="card c1"><h3><i>01</i>决定权表</h3><p><b>AI narrates and deep-dives, rules decide facts</b> · 六段流水线六种决定权 · findings 自带 evidence · AI 三重门（ai_outbound / 匿名化 / 只给叙事位）</p></div>
+    <div class="card c2"><h3><i>02</i>告警力学</h3><p><b>Netdata CLEAR 滞后阈值</b>治 flapping（恢复线 = min(内置, 主阈值−5)）· <b>健康分 0.5ⁿ 衰减</b> · SCORE_WEIGHTS 按业务影响分级 · 容器 dead 比 exited 重</p></div>
+    <div class="card c3"><h3><i>03</i>五种拨测</h3><p>URL 条件引擎（码/关键词/证书/延迟）· <b>纯 stdlib DNS 栈</b>（RFC1035 压缩指针）· DoH 复用线格式 · IcmpSendEcho 64 位定参坑 · <b>Gatus 3/2 双阈值防抖</b> · 健康分不被拨测污染</p></div>
+    <div class="card c4"><h3><i>04</i>深挖与根因卡</h3><p>DEEP_DIVE 只读探针真跑命令 · <b>根因陈述不猜未验证的成因</b> · confidence 只有高/中两档 · chain 预定义因果链 · replace 而非 format（docker inspect 花括号）</p></div>
+    <div class="card c5"><h3><i>05</i>优雅降级</h3><p>AI 三态（成功/失败/未启用全是正常态）· <b>「AI 叙事失败（诊断继续，规则结论不受影响）」</b> · _fallback_answer 本地兜底 · 匿名化 RFC 5737 · 映射表用完即焚</p></div>
+    <div class="card c6"><h3><i>06</i>提案四层闸</h3><p><b>批准 ≠ 执行</b>（decide 与 execute 分离）· propose_exec 默认 off · <b>五条白名单正则逐段整体匹配</b> · 风险取最高 · 连被拒都进 proposal_runs 审计 · 宁可不给提案</p></div>
+  </div>
+  <div class="bars">
+    <div><b>四枚确定性小样</b><small>拨测状态机 / 健康分秤 / 根因卡生成器 / 命令安检门 —— 判定规则照抄源码，固定种子可复现</small></div>
+    <div><span class="pill">单文件 0 依赖</span><span class="pill">只读解剖</span><span class="pill">LXGW 文楷子集</span><span class="pill">GitHub Pages</span></div>
+  </div>
+  <p class="foot">STARRYSEA1412.GITHUB.IO/AGENT-PATROL · RACK ELEVATION / 2026</p>
+</div>
+</body>
+</html>

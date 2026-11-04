@@ -1,0 +1,48 @@
+<section class="chapter" id="ch1">
+  <div class="ch-head">
+    <div class="ch-num"><b>01</b>CHAPTER<br/>00:00</div>
+    <div class="ch-title">
+      <h2>规则决定事实，AI 负责说话</h2>
+      <p>整个系统最重要的一次分工：确定性引擎先跑完所有判断，大模型才被允许开口——而且只有叙事权</p>
+    </div>
+  </div>
+  <div class="ch-body">
+    <p class="lede">市面上「AI 监控」的典型做法，是把指标喂给大模型，让它判断「服务器是否健康」。这台 Agent 的规则引擎模块在第一行注释里就把这条路堵死了（rules.py 原文）：</p>
+    <div class="pull">Deterministic rule engine: runs before any LLM.<br/><b>AI narrates and deep-dives, rules decide facts.</b><br/>确定性规则引擎，先于任何大模型运行。AI 负责叙事与深挖，事实由规则决定。</div>
+    <p>这不是对 AI 的不信任表演，而是一次严格的<strong>职责切分</strong>。把整条巡检流水线摊开看，每一环的「决定权」归属清清楚楚：</p>
+    <div class="fig"><div class="frame">
+      <p class="layers-cap">FIG. 01 · 巡检流水线与决定权归属——每一环都标着「谁说了算」</p>
+      <div class="layers">
+        <div class="layer"><span class="layer-mark lm-1"></span><i>S1</i><b>采集<small>collector.py</small></b><p>SSH 跑只读命令解析指标（df/ps/docker/证书/登录），或 mock 双轨。<strong>决定权：命令与解析器。</strong></p></div>
+        <div class="layer"><span class="layer-mark lm-2"></span><i>S2</i><b>规则<small>rules.py</small></b><p>阈值比对产出 findings + 健康分。<strong>决定权：规则引擎——全系统唯一的事实来源。</strong></p></div>
+        <div class="layer"><span class="layer-mark lm-3"></span><i>S3</i><b>拨测<small>probes.py</small></b><p>五类主动拨测独立成域，失败只落事件不进 findings。<strong>决定权：状态机。</strong></p></div>
+        <div class="layer"><span class="layer-mark lm-4"></span><i>S4</i><b>深挖<small>analysis.py</small></b><p>真实执行只读探针命令拿证据，组装根因卡。<strong>决定权：证据（命令输出）。</strong></p></div>
+        <div class="layer"><span class="layer-mark lm-5"></span><i>S5</i><b>叙事<small>ai_narration</small></b><p>AI 把证据讲成人话，挂在卡片侧栏。<strong>决定权：无——附加视角，永不覆盖 root_cause。</strong></p></div>
+        <div class="layer"><span class="layer-mark lm-6"></span><i>S6</i><b>提案<small>executor.py</small></b><p>白名单命令，批准与执行分离。<strong>决定权：人 + 白名单正则。</strong></p></div>
+      </div>
+    </div><figcaption><span><b>FIG. 01</b> 六段流水线，六种决定权</span><span>标本 · backend/app</span></figcaption></div>
+
+    
+    <div class="fig"><div class="frame">
+      <img src="assets/art/ch1.webp" alt="单眼折纸鸟法官坐在审判席后，法槌按在写满公式的石板上" width="1152" height="832" loading="lazy" style="width:100%;border:1px solid var(--line)"/>
+    </div><figcaption><span><b>FIG. 02</b> 规则先于言说：法槌落下之前，谁都别开口</span><span>INK &amp; GOUACHE / 2026</span></figcaption></div>
+
+<h3>findings：事实的最小单元</h3>
+    <p>规则引擎的产出物叫 finding——一条结构化事实：<code>{type, severity, title, detail, evidence}</code>。磁盘、内存、CPU、load、IO 写入、温度、swap、failed 服务、可疑登录、容器退出、证书临期，每类各有判据。看真实代码（rules.py · <code>evaluate()</code>，有删节）：</p>
+    <div class="code"><div class="code-bar"><span>rules.py · evaluate() · 阈值判定（节选）</span><b>事实长这样</b></div>
+<pre><span class="k">if</span> disk >= T[<span class="s">"disk_crit"</span>] <span class="k">or</span> (<span class="s">"disk"</span> <span class="k">in</span> active <span class="k">and</span> disk >= C[<span class="s">"disk"</span>]):
+    <span class="f">add</span>(<span class="s">"disk"</span>, <span class="s">"crit"</span> <span class="k">if</span> disk >= T[<span class="s">"disk_crit"</span>] <span class="k">else</span> <span class="s">"warn"</span>,
+        <span class="s">f"磁盘使用率 {disk:.0f}%"</span>, <span class="s">f"Disk usage {disk:.0f}%"</span>,
+        <span class="s">"磁盘即将写满，有写入失败风险"</span> <span class="k">if</span> disk >= T[<span class="s">"disk_crit"</span>]
+        <span class="k">else</span> <span class="s">f"超过 {T['disk_warn']:.0f}% 警戒线"</span>, ...,
+        {<span class="s">"disk"</span>: disk})          <span class="c"># evidence 随行：数字进事实，不进叙事</span></pre></div>
+    <p>三处细节值得停。其一，<strong>evidence 随行</strong>：每条 finding 自带结构化证据（<code>{"disk": 91.3}</code>），后面深挖、根因、提案全从这里取数——事实和它的依据从不分离。其二，<strong>双语在生成处落定</strong>：「中文是存库事实源，EN 面板在生成处即落英文文案」——而不是展示层现翻。其三，那个 <code>C["disk"]</code>：告警已打开时，磁盘要回落到比告警线更低的恢复线才算解除——这是第二章的主角，先按下。</p>
+
+    <h3>AI 的三重门</h3>
+    <p>AI 在这台机器里要过三道门才说得上话：<strong>第一道，ai_outbound 开关</strong>——<code>_llm_enabled()</code> 查设置，默认关着，LLM 根本不出网；<strong>第二道，匿名化</strong>——主机名和 IP 先换成 RFC 5737 文档段占位符（第五章细拆）；<strong>第三道，位置</strong>——就算三样齐了，AI 的输出也只是卡片上的 <code>ai_narration</code> 字段，和 <code>root_cause</code> 并排放着，但 code 里的注释把它钉死了：</p>
+    <div class="pull">规则引擎结论永远为准；AI 叙事仅作为附加视角单列，<b>绝不覆盖 root_cause</b>。</div>
+    <p>第五行那格「决定权：无」就是这个意思。不是 AI 不会说话，是<em>说话这件事被安排在事实之后</em>。</p>
+    <div class="note"><b>系列对照：</b>VOL.06《给 Agent 打分》立过「判分器也要被评测」，VOL.11 立过「提示词是意见，工具是法律」。这一篇再进一格：<strong>叙事和事实是两种权限</strong>——让最会说话的组件只拿叙事权限，是架构级的防幻觉。</div>
+    <p>分工定了，接下来看规则引擎自己怎么站得住：阈值会抖、分数会砸穿，第二章讲两剂解药。</p>
+  </div>
+</section>

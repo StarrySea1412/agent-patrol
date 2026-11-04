@@ -1,0 +1,56 @@
+<section class="chapter" id="ch4">
+  <div class="ch-head">
+    <div class="ch-num"><b>04</b>CHAPTER<br/>00:03</div>
+    <div class="ch-title">
+      <h2>深挖：证据是跑出来的</h2>
+      <p>根因卡的每一个字都要有出处——「以深挖输出为准」这句话，是这台 Agent 对幻觉最硬的防御</p>
+    </div>
+  </div>
+  <div class="ch-body">
+    <p class="lede">规则引擎报出「磁盘 91%」，然后呢？大多数「智能运维」在这里让大模型自由发挥，于是根因分析里长出「可能是日志膨胀，也可能是容器写入风暴」这类漂亮的猜谜。这台 Agent 的 <code>analyze_finding()</code> 走了另一条路：<strong>先跑命令，后写卡片</strong>。</p>
+    <h3>DEEP_DIVE：只读探针命令表</h3>
+    <p>analysis.py 里有一张 DEEP_DIVE 表：每类 finding 对应一条真实执行的只读命令（<code>du -xh /var --max-depth=2 | sort -rh | head -5</code> 之类），命令经 SSH 在目标机上真跑，输出截 800 字进卡片。代码里那个 replace-not-format 的细节最见功力（analysis.py · L637 注释原文）：</p>
+    <div class="pull">replace 而非 format：<b>docker inspect 的 {{.State.*}} 花括号不能被 str.format 吃掉。</b></div>
+    <p>一行注释，一次一定会踩的坑——Go 模板的花括号和 Python 的 format 占位符撞车。深挖命令的输出按步骤落进卡片的 <code>steps</code> 数组，每步带 <code>{label, command, output}</code>——<em>证据的结构化程度和结论一样高</em>。</p>
+    
+    <div class="fig"><div class="frame">
+      <img src="assets/art/ch4.webp" alt="单眼折纸鸟工程师用放大镜读一卷打印着数值的纸带" width="1152" height="832" loading="lazy" style="width:100%;border:1px solid var(--line)"/>
+    </div><figcaption><span><b>FIG. 03</b> 深挖：每一条结论都要能指着一行输出</span><span>INK &amp; GOUACHE / 2026</span></figcaption></div>
+
+<h3>根因陈述的克制</h3>
+    <p>卡片上的 root_cause 从哪来？来自 <code>_rule_root_cause()</code>——函数注释先立规矩（原文）：</p>
+    <div class="pull">真实主机的根因陈述 = <b>规则引擎的事实，不猜测未验证的成因。</b></div>
+    <p>所以磁盘类根因写的是「磁盘使用率 91% 越过阈值，<em>主要占用来源以深挖输出为准</em>」——它明确告诉你哪些是事实（越限）、哪些还没验证（占用来源）、去哪里验证（深挖输出）。可疑登录类则精确到证据字段：「来源 IP {ip} 以用户 {user} 登录成功，不在常见内网段」。对比大模型版本的根因——「可能由异常进程导致，建议关注」——差别不在文采，在<em>每个字是否可回查</em>。</p>
+    <h3>confidence 为什么只有两档</h3>
+    <p>根因卡的置信度标注只有高/中两档，判定规则一行（analysis.py · L656）：</p>
+    <div class="code"><div class="code-bar"><span>analysis.py · L656（原样）</span><b>置信度 = 有没有跑出证据</b></div>
+<pre>confidence = i18n.t(<span class="s">"高"</span>, <span class="s">"High"</span>) <span class="k">if</span> steps <span class="k">else</span> i18n.t(<span class="s">"中"</span>, <span class="s">"Medium"</span>)</pre></div>
+    <p>跑出了深挖步骤就是「高」，只有规则事实就是「中」——没有第三档「低」，因为不存在「没证据也敢写根因」的情况。这张卡的骨架长这样：</p>
+    <div class="code"><div class="code-bar"><span>analysis.py · analyze_finding() · L690–699（原样结构）</span><b>根因卡六字段</b></div>
+<pre>card = {
+    <span class="s">"root_cause"</span>:   root_cause,      <span class="c"># 规则事实，不猜</span>
+    <span class="s">"chain"</span>:        chain,           <span class="c"># 因果链（发现类型 → 预定义传导路径）</span>
+    <span class="s">"confidence"</span>:   confidence,      <span class="c"># 有深挖=高 / 无=中</span>
+    <span class="s">"steps"</span>:        steps,           <span class="c"># 只读探针执行轨迹 {label, command, output}</span>
+    <span class="s">"proposal_id"</span>:  proposal_id,     <span class="c"># 修复提案（下一章：批准≠执行）</span>
+    <span class="s">"ai_narration"</span>: ai_narration,    <span class="c"># AI 附加视角，永不覆盖 root_cause</span>
+}</pre></div>
+    <p>注意 <code>chain</code>——因果链不是模型现编的，而是按发现类型预定义的传导路径（如 磁盘涨 → journal 堆积 → 写入失败风险）。哪些因果是这台系统「承认」的，全部枚举在表里；表外没有因果。</p>
+
+    <div class="demo" id="d3">
+      <div class="demo-head"><span class="demo-tag">DEMO 03 · 根因卡生成器</span><span class="demo-title">一张卡怎么长出来<span class="hint">选发现类型，切 AI 三态</span></span></div>
+      <div class="demo-body">
+        <div class="rc-wrap">
+          <div class="rc-types" id="d3-types"></div>
+          <div>
+            <div class="rc-card" id="d3-card"></div>
+            <div class="rc-foot" id="d3-foot"></div>
+          </div>
+        </div>
+      </div>
+      <div class="demo-foot">chain / root_cause / confidence 判定与 steps 结构照抄 <b>analyze_finding()</b> 与 <b>_rule_root_cause()</b>；AI 三态演示 <b>ai_narration</b> 的位置——成功也只是附加视角，失败则事件注明「诊断继续，规则结论不受影响」。</div>
+    </div>
+
+    <p>深挖给了证据，规则给了结论。但一套系统真正的性格，要看它<strong>失败的时候怎么办</strong>——下一章专门讲这个。</p>
+  </div>
+</section>

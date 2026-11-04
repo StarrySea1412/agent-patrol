@@ -1,0 +1,58 @@
+<section class="chapter" id="ch6">
+  <div class="ch-head">
+    <div class="ch-num"><b>06</b>CHAPTER<br/>00:05</div>
+    <div class="ch-title">
+      <h2>提案：批准不是执行</h2>
+      <p>Agent 可以递修复方案，但按按钮的必须是另一只手——全篇最硬的一条铁律，长在 executor.py 第一行</p>
+    </div>
+  </div>
+  <div class="ch-body">
+    <p class="lede">诊断卡上挂着一条修复提案，比如「清理 journal 日志」。人点了批准——然后呢？大多数系统的答案是「执行」。这台 Agent 的答案是（executor.py 模块注释，原文）：</p>
+    <div class="pull"><b>铁律不变：批准仅记录决策（decide 接口），执行是批准之后另一个显式动作</b>，且受设置 propose_exec 门控（默认 off）。每个命令逐段过白名单，<b>每次尝试（含被拒/超时）都写 proposal_runs 审计表</b>。</div>
+    <p>拆开是三层独立闸门：<strong>①批准 ≠ 执行</strong>（两个接口，中间隔着人的第二次动作）；<strong>②propose_exec 默认 off</strong>（全站总开关，装好即用时不具备执行能力）；<strong>③白名单</strong>（过了开关还要过正则）。任何一层说 no，命令都到不了目标机。</p>
+    <h3>白名单：五条正则，逐段整体匹配</h3>
+    <p>全部可执行的修复命令只有五条（executor.py · <code>WHITELIST</code>，原样）：</p>
+    <div class="code"><div class="code-bar"><span>executor.py · WHITELIST · L15–21（原样）</span><b>五条，一条不多</b></div>
+<pre>WHITELIST = [
+    (re.<span class="f">compile</span>(<span class="s">r"^journalctl --vacuum-size=\d+[MG]$"</span>),                <span class="s">"低危"</span>, <span class="s">"清理 journal 日志"</span>),
+    (re.<span class="f">compile</span>(<span class="s">r"^find /var/log -name '\*\.gz' -mtime \+\d+ -delete$"</span>), <span class="s">"中危"</span>, <span class="s">"删除过期压缩日志"</span>),
+    (re.<span class="f">compile</span>(<span class="s">r"^systemctl restart [a-z0-9@._-]+$"</span>),                 <span class="s">"中危"</span>, <span class="s">"重启服务"</span>),
+    (re.<span class="f">compile</span>(<span class="s">r"^ufw insert 1 deny \d{1,3}(\.\d{1,3}){3}$"</span>),          <span class="s">"中危"</span>, <span class="s">"防火墙封禁 IP"</span>),
+    (re.<span class="f">compile</span>(<span class="s">r"^passwd [a-z_][a-z0-9_-]{0,30}$"</span>),                   <span class="s">"高危"</span>, <span class="s">"轮换口令"</span>),
+]
+TIMEOUT = <span class="n">20</span>  <span class="c"># 秒</span></pre></div>
+    <p>校验函数 <code>validate()</code> 的关键设计是<strong>按 <code>&amp;&amp;</code> 分段、每段必须整体匹配</strong>——拼一条「清理日志 &amp;&amp; 顺便 rm -rf /」会在第二段被拒，<em>白名单外的任何拼接都进不去</em>。风险等级取各段最高者；拒绝时明说「白名单外命令: …」。正则本身的克制也值得看：systemctl restart 只放行小写服务名字符，<code>passwd</code> 限制用户名形状——五条规则各自带着自己的边界。</p>
+    <p>提案的生成端同样克制。_proposal_for 的注释（原文）：「真实主机只提有安全依据的命令：提案是要被执行的，<strong>命令里的 IP/服务名必须来自这台机器的证据</strong>，而不是演示剧本」。而最动人的一句是最后的兜底：</p>
+    <div class="pull">memory/cpu/load/cert：真实主机上没有可安全白名单执行的一键命令，<b>宁可不给提案</b>。</div>
+    <p>内存高？没有一键修复，就不提。这和市面「AI 一键优化」形成刺眼对比：<em>没有安全解法的场景，正确的输出是沉默，不是发明一个按钮。</em></p>
+
+    <div class="demo" id="d4">
+      <div class="demo-head"><span class="demo-tag">DEMO 04 · 命令安检门</span><span class="demo-title">逐段过闸，一段不中全单拒绝<span class="hint">点病例或输入命令</span></span></div>
+      <div class="demo-body">
+        <div class="gw-wrap">
+          <div class="gw-in">
+            <div class="gw-cases" id="d4-cases"></div>
+            <div class="gw-input"><input type="text" id="d4-cmd" placeholder="输入命令，如 systemctl restart nginx"/><button class="run" id="d4-check">安检</button></div>
+            <div class="gw-verdict" id="d4-verdict"></div>
+            <div class="gw-segs" id="d4-segs"></div>
+            <div class="gw-audit" id="d4-audit"></div>
+          </div>
+          <div class="gw-side">
+            <h5>白名单（5 条 · executor.py 原文）</h5>
+            <div id="d4-rules"></div>
+          </div>
+        </div>
+      </div>
+      <div class="demo-foot">五条正则、分段逻辑、风险取最高、拒绝文案照抄 <b>validate()</b>；提案生成端补一条标本规则：命令里的 IP/服务名必须来自这台机器的证据，宁可不给提案。</div>
+    </div>
+
+    
+    <div class="fig"><div class="frame">
+      <img src="assets/art/ch6.webp" alt="单眼折纸鸟安检员在金属安检门旁，一张命令纸条被闸口拦下" width="1152" height="832" loading="lazy" style="width:100%;border:1px solid var(--line)"/>
+    </div><figcaption><span><b>FIG. 04</b> 安检门：逐段过闸，一段不中全单拒绝</span><span>INK &amp; GOUACHE / 2026</span></figcaption></div>
+
+<h3>审计：连「被拒」都有台账</h3>
+    <p>执行出口的一切结果——成功、失败、超时、被拒——都进 <code>proposal_runs</code> 表（mode / command / risk / status / exit_code / output / duration_ms）。连「执行超过 20s 被终止」的输出都是一句完整的话：「执行超过 20s 被终止（<em>审计已留存；恢复需人工确认</em>）」。mock 主机还设计了「修复生效 → 指标曲线真实回落」（_mock_recover），让演示环境下人能看到修复前后曲线的差别——<em>连教学用的假数据都遵守因果律</em>。</p>
+    <p>批准、白名单、开关、审计——四层叠完，才轮到那只「另一只手」按下去。而这台机器对「动手」的态度，恰好是理解它整个安全模型的钥匙：下一章收束全局。</p>
+  </div>
+</section>

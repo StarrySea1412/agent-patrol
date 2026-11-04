@@ -1,0 +1,77 @@
+<section class="chapter" id="ch3">
+  <div class="ch-head">
+    <div class="ch-num"><b>03</b>CHAPTER<br/>00:02</div>
+    <div class="ch-title">
+      <h2>五种拨测与一台手写的 DNS 栈</h2>
+      <p>URL / TCP / DNS / DoH / ICMP 五路主动出击，而最惊人的决定是：不引 dnspython，RFC1035 自己写</p>
+    </div>
+  </div>
+  <div class="ch-body">
+    <p class="lede">主机指标巡检回答「这台机器累不累」，回答不了「它对外的服务还活着吗」。补这个维度缺口的是拨测模块（probes.py 文件头，原文）：</p>
+    <div class="pull">对标 Uptime Kuma 拨测 / Gatus 状态机，补「只管主机不管服务」的维度缺口。<br/>URL（GET）· TCP（host:port）· DNS（解析器 + 期望应答）· <b>DoH（RFC 8484，Kuma 没有的差异化项）</b>· ICMP（均零特权零依赖）。</div>
+    <h3>一台不引库的 DNS 栈</h3>
+    <p>五类拨测里最显手艺的是 DNS。市面做法是 <code>pip install dnspython</code>，这台 Agent 的选择是把协议自己写一遍——查询构造、压缩指针解析、RDATA 展开共百来行（probes.py · L96–229）：</p>
+    <div class="code"><div class="code-bar"><span>probes.py · _parse_name() · RFC1035 压缩指针（节选）</span><b>自己读报文</b></div>
+<pre><span class="k">def</span> <span class="f">_parse_name</span>(buf: bytes, off: int) -> tuple[str, int]:
+    <span class="s">"""读 DNS 名称（RFC1035 压缩指针），返回 (name, 消耗结束偏移)。"""</span>
+    labels = []
+    pos, end, jumped = off, off, <span class="k">False</span>
+    <span class="k">while</span> <span class="k">True</span>:
+        ln = buf[pos] <span class="k">if</span> pos &lt; <span class="f">len</span>(buf) <span class="k">else</span> <span class="n">0</span>
+        <span class="k">if</span> ln == <span class="n">0</span>:
+            <span class="k">if</span> <span class="k">not</span> jumped: end = pos + <span class="n">1</span>
+            <span class="k">break</span>
+        <span class="k">if</span> ln &amp; <span class="n">0xC0</span>:  <span class="c"># 压缩指针</span>
+            <span class="k">if</span> <span class="k">not</span> jumped:
+                end = pos + <span class="n">2</span>; jumped = <span class="k">True</span>
+            pos = ((ln &amp; <span class="n">0x3F</span>) &lt;&lt; <span class="n">8</span>) | buf[pos + <span class="n">1</span>]
+            <span class="k">continue</span>
+        labels.append(buf[pos + <span class="n">1</span>:pos + <span class="n">1</span> + ln].decode(<span class="s">"ascii"</span>, <span class="s">"replace"</span>))
+        pos += <span class="n">1</span> + ln
+    <span class="k">return</span> <span class="s">"."</span>.join(labels), end</pre></div>
+    <p>为什么不引库？文件头没解释，但收益写在结构里：<strong>DoH 直接复用同一套线格式</strong>——<code>doh_lookup()</code> 把同一段 <code>_build_query()</code> 的报文 POST 到 <code>https://1.1.1.1/dns-query</code>（RFC 8484），解析走同一个 <code>_parse_response()</code>。一个协议，两种传输，零新依赖。还能离线测试：「纯函数，离线可测」——构造几段字节流就能单测解析器，不需要网络。</p>
+    <h3>ICMP 的两个平台，两种市井智慧</h3>
+    <p>ICMP ping 在两个操作系统上是两套完全不同的生存策略。Windows 直插 iphlpapi 的 <code>IcmpSendEcho</code>——非特权进程就能发 echo；Linux 走 <code>SOCK_DGRAM</code> ICMP——内核替你匹配应答，同样不用 root。而那段 ctypes 代码里埋着一行用血换来的注释：</p>
+    <div class="pull">64 位 Python 必须显式定参（默认按 32 位 int 传参，<b>指针会被截断 → access violation</b>）。</div>
+    <p>四百字节的 argtypes 声明，换来的是「少一次深夜段错误」。这就是手写协议栈的隐性账单：<em>省下的依赖，都要用理解力偿还</em>——但理解力一旦付过，就变成了自己的资产。</p>
+    <h3>状态机：3 败才下线，2 成才恢复</h3>
+    <p>拨测结果的定性不靠单次请求——那会被一次网络抖动骗到。Gatus 式双阈值防抖（probes.py · <code>evaluate()</code>）：</p>
+    <ul>
+      <li><strong>连续 fail_threshold（默认 3）次失败 → down</strong>；失败计数与是否翻转无关，成功即清零。</li>
+      <li><strong>down 中连续 success_threshold（默认 2）次成功 → up</strong>——恢复比下线更难，防止刚翻就抖回去。</li>
+      <li>push 型目标反向：不轮询，等上报；容忍窗口（默认 600s）过时未上报直接判死，「grace 即防抖」。</li>
+    </ul>
+    <div class="demo" id="d1">
+      <div class="demo-head"><span class="demo-tag">DEMO 01 · 拨测状态机</span><span class="demo-title">3 败下线，2 成恢复<span class="hint">逐次点击，看防抖怎么吃掉抖动</span></span></div>
+      <div class="demo-body">
+        <div class="pm-wrap">
+          <div>
+            <div class="pm-stage">
+              <div class="pm-state" id="d1-state"></div>
+              <div class="pm-lights" id="d1-lights"></div>
+              <div class="pm-counter-lbl" id="d1-lbl"></div>
+              <div class="pm-log" id="d1-log"></div>
+            </div>
+            <div class="pm-btnrow" style="margin-top:12px">
+              <button class="run" id="d1-fail">这次拨测失败</button>
+              <button class="ghost" id="d1-ok">这次拨测成功</button>
+              <button class="ghost" id="d1-reset">重置</button>
+            </div>
+          </div>
+          <div class="pm-side">
+            <h5>状态台账</h5>
+            <div class="pm-kv" id="d1-kv"></div>
+            <div class="hintline">fail_threshold = <b>3</b> · success_threshold = <b>2</b><br/>周期 30s · 并发上限 8 · 15s 步进</div>
+          </div>
+        </div>
+      </div>
+      <div class="demo-foot">照抄 <b>evaluate()</b> 的计数与翻转逻辑：失败累计 fail_streak（与翻转无关）、成功累计 succ_streak；up 中 3 连败 → down，down 中 2 连胜 → up。通知翻转才发（down 带原因 / up 带持续时长）。</div>
+    </div>
+
+    <h3>域隔离：拨测不许污染健康分</h3>
+    <p>最后是这个模块最清醒的一个决定，写在文件头（原文）：</p>
+    <div class="pull">设计取舍：拨测失败不进 findings（那是主机指标域），只落 events + probe_log；面板独立「拨测」页展示，<b>Fleet 健康分不被拨测污染</b>。</div>
+    <p>想想反例：把拨测失败也按 warn 塞进健康分，那么一次 DNS 解析器抽风会把「机器本身很健康」的事实搅浑——分数从此说不清自己是什么。域隔离让主机域和服务域各自记账、各自告警，<em>分数的语义于是稳定</em>。这也是对 ch2 衰减公式的补充：衰减管同域堆积，隔离管跨域混淆。</p>
+    <div class="note"><b>调度细节：</b>拨测有独立的 15s 步进循环，周期默认 30s，与 60s 主机巡检解耦；<code>DIAL_SEMA = Semaphore(8)</code> 防一串 10s 超时目标拖住整轮；<code>gather(return_exceptions=True)</code> 保证单目标异常不拖垮同轮其他目标——并发纪律与 VOL.10 的「单模型重试不惊动全链」同源。</div>
+  </div>
+</section>

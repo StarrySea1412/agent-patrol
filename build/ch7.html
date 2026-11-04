@@ -1,0 +1,32 @@
+<section class="chapter" id="ch7">
+  <div class="ch-head">
+    <div class="ch-num"><b>07</b>CHAPTER<br/>00:06</div>
+    <div class="ch-title">
+      <h2>数据不出本机</h2>
+      <p>采集只读、AI 出网要开两道闸、面板有登录防护——「全本机」三个字是十几个小决定的合数</p>
+    </div>
+  </div>
+  <div class="ch-body">
+    <p class="lede">README 里那句话——「让一个懂运维的 agent 住进你自己的机器」——听起来像营销。落到代码上，「住进你自己的机器」由一连串具体的小决定构成，每个都能指到行号。</p>
+    <h3>采集端：只读是唯一姿势</h3>
+    <p>collector.py 在目标机上跑的全部是只读探针命令：df 看磁盘、ps 看进程、docker ps 看容器、openssl 看证书、last 看登录。深挖命令同样只读（ch4 的 DEEP_DIVE 表）。<strong>唯一有写能力的路径是提案执行</strong>——而那条路要连过 ch6 的四层闸。SSH 会话本身被 12 秒超时包着（run_cmd 默认 timeout=12），单条命令挂死拖不垮巡检循环。</p>
+    <h3>AI 端：两道闸一道焚化炉</h3>
+    <p>ch5 拆过：ai_outbound 总闸默认关；开了之后文本先过 anonymize()，主机名/IP 全部换成 RFC 5737 占位符，映射表用完即焚。值得补的是它的孪生设计——<code>build_fleet_context()</code>：给 AI 的舰队上下文文本同样走匿名化管线，同一个映射表贯穿整个调用。<em>模型看到的是一个假名舰队，而它对假名的所有推理都能被 de_anonymize 原样搬回真实拓扑。</em>隐私保护与可用性在这里没有互斥。</p>
+    
+    <div class="fig"><div class="frame">
+      <img src="assets/art/ch7.webp" alt="单眼折纸鸟值班员趴在值守室桌上打盹，绿灯与值班日志相伴" width="1152" height="832" loading="lazy" style="width:100%;border:1px solid var(--line)"/>
+    </div><figcaption><span><b>FIG. 05</b> 值守室：能安心打盹，因为每道闸都落了锁</span><span>INK &amp; GOUACHE / 2026</span></figcaption></div>
+
+<h3>面板端：guard.py 的三行</h3>
+    <p>面板自己的防护浓缩在一个 34 行的模块里：<code>allow(ip)</code> 判断来源、<code>audit(ip, path, code)</code> 记审计、<code>recent()</code> 读最近记录。认证、频控、审计各自独立，没有一处「为了演示关掉安全」的开关。</p>
+    <h3>这台机器的性格清单</h3>
+    <p>把七章合上，这台巡检 Agent 的性格可以列成一张单子——每一条都对应一处可核对的代码：</p>
+    <div class="rules">
+      <div class="rule"><b>PATROL 01 · 事实与叙事分权</b><p>规则引擎先于 LLM 运行；根因卡结论永远来自规则事实；AI 叙事失败时事件文案明说「诊断继续，规则结论不受影响」。架构上防幻觉，比提示词里求它别编更可靠。</p></div>
+      <div class="rule"><b>PATROL 02 · 老办法先于新名词</b><p>Netdata 的 CLEAR 滞后阈值、Gatus 的双阈值防抖、0.5ⁿ 衰减——这些都不是新发明，但被认真写成一等公民：注释里讲清楚为什么，公式摊开算给读者看。监控系统的可信度是减法堆出来的。</p></div>
+      <div class="rule"><b>PATROL 03 · 动手是另一件事</b><p>批准只是记录；执行有独立开关（默认 off）；五条正则白名单逐段整体匹配；没有安全解法就宁可不给提案；连被拒都进审计表。修复链路的每一步都比上一步难，方向永远朝向人。</p></div>
+    </div>
+    <p>至此，造物手记的 Agent 组织学补上了最后一块：VOL.10 让 Agent 学会挑模型，VOL.11 让 Agent 学会指挥 Agent，这一篇让 Agent 学会<strong>独自值守</strong>——独自值守的全部要领，不是多聪明，而是在每个可以自作主张的岔路口，都提前修好一道闸。</p>
+    <div class="pull">巡检 Agent 的最高美德不是发现得快，<b>而是它自作主张的能力边界，与它值班室的墙一样清楚。</b></div>
+  </div>
+</section>

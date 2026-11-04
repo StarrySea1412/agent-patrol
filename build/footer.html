@@ -1,0 +1,24 @@
+<div class="wrap epilogue" id="closing">
+  <h2>结语：值守是一种克制的艺术</h2>
+  <p>拆完这台巡检 Agent，最想留下的不是某个机制，而是一种口味：它对「智能」的接入极其节制——AI 三道门、叙事不越位、提案默认 off、五条白名单；同时对「笨功夫」极其大方——手写 DNS 栈、直插 iphlpapi、clear 阈值联动、0.5ⁿ 衰减。智能监控产品的分水岭或许就在这里：<strong>把 AI 放进决定权表的时候，你给它的是叙事权还是裁决权？</strong></p>
+  <div class="rules">
+    <div class="rule"><b>RULE 01 · 先定决定权表，再谈接 AI</b><p>把系统的每个环节列出来，标上「谁说了算」：采集、规则、拨测、深挖、叙事、执行——六个环节六个答案，AI 只在叙事位。先有这张表，AI 才是能力；没有这张表，AI 就是风险。</p></div>
+    <div class="rule"><b>RULE 02 · 监控的手感在减法</b><p>滞后阈值减掉 flapping，指数衰减减掉分数砸穿，域隔离减掉跨域混淆，翻转才发减掉通知轰炸。每一刀都让信号更干净一点——告警的可信度是被减出来的。</p></div>
+    <div class="rule"><b>RULE 03 · 失败路径要写出结果</b><p>「AI 叙事失败（诊断继续，规则结论不受影响）」「执行超过 20s 被终止（审计已留存；恢复需人工确认）」——这两条文案能当范本：说清发生了什么、影响是什么、下一步是什么。系统崩溃的样式，就是它的品格证明。</p></div>
+  </div>
+  <div class="limits"><b>这篇没解决的：</b>多机横向扩展（单机 SQLite + 目录锁，Fleet 规模有限）；告警规则的自适应学习（阈值全部人工配置，无异常检测模型）；拨测的目标管理体验（对标 Kuma 仍有差距）；以及 Windows 之外的平台验收（IcmpSendEcho 分支只在本机验过）。</div>
+  <div class="links">
+    <a href="https://github.com/StarrySea1412/hermes-watch" target="_blank" rel="noopener">hermes-watch（本文解剖标本）</a>
+    <a href="https://starrysea1412.github.io/agent-orchestrator/" target="_blank" rel="noopener">上期 · VOL.11 当 Agent 指挥 Agent</a>
+    <a href="https://starrysea1412.github.io/agent-switchboard/" target="_blank" rel="noopener">VOL.10 给 Agent 配一台总机</a>
+    <a href="https://starrysea1412.github.io/agent-eval/" target="_blank" rel="noopener">VOL.06 给 Agent 打分</a>
+  </div>
+</div>
+
+<footer class="wrap site-foot">
+  <div>
+    <div>造物手记 VOL.12 · 住进机房的 Agent</div>
+    <div style="margin-top:5px">RACK ELEVATION / 2026.11 / 单文件 · 零依赖 · 确定性小样</div>
+  </div>
+  <div class="foot-note">标本 hermes-watch 为本机自研项目，backend/app 24 模块 6799 行；本文引文核对到 rules.py / probes.py / analysis.py / executor.py / collector.py 真实函数与注释，为可读性有删节与中译调整，只读解剖未运行其巡检循环。四枚小样为确定性模型：判定规则照抄源码，参数摊在明面上。字体为 LXGW 文楷（OFL 许可，见 assets/fonts/OFL.txt）。插图由 GPT 系图像模型生成。</div>
+</footer>

@@ -1,0 +1,34 @@
+<section class="chapter" id="ch5">
+  <div class="ch-head">
+    <div class="ch-num"><b>05</b>CHAPTER<br/>00:04</div>
+    <div class="ch-title">
+      <h2>根因卡与优雅降级</h2>
+      <p>AI 三态、fallback 文案、匿名化映射——一台系统的可靠性，全写在它失败的路上</p>
+    </div>
+  </div>
+  <div class="ch-body">
+    <p class="lede">根因卡六字段里最谦逊的是 <code>ai_narration</code>。这一章把 AI 在这台机器里的完整生命周期摊开——三态、降级、和它永远碰不到的东西。</p>
+    <h3>AI 的三态：成功、失败、未启用</h3>
+    <p>叙事的入口有一道总闸（analysis.py · <code>_llm_enabled()</code>）：设置键 <code>ai_outbound</code> 非 <code>on</code> 时，LLM 根本不出网——卡片照出，只是没有 ai_narration 字段。<strong>「没有 AI」不是一个错误态，是一个正常态。</strong></p>
+    <p>开关开了，还有失败态。_llm_narrate 抛异常时，代码做的事令人安心（analysis.py · L684–688）：</p>
+    <div class="code"><div class="code-bar"><span>analysis.py · AI 失败路径（原样）</span><b>失败也要有名字</b></div>
+<pre><span class="k">except</span> Exception <span class="k">as</span> e:
+    ai_error = <span class="s">f"{type(e).__name__}: {e}"</span>[:<span class="n">160</span>]
+    db.<span class="f">execute</span>(<span class="s">"INSERT INTO events(...) VALUES(...)"</span>,
+        (<span class="s">"ai_error"</span>,
+         i18n.t(<span class="s">f"AI 叙事失败（诊断继续，规则结论不受影响）: {ai_error}"</span>,
+                <span class="s">f"AI narration failed (diagnosis continues, rule verdicts unaffected)"</span>),
+         <span class="s">"{}"</span>))</pre></div>
+    <p>三件事同时发生：错误截 160 字进 ai_error 字段、事件表落一条<em>说清了后果的</em>记录（不是干巴巴的堆栈）、诊断流程照常走完。<strong>卡片不重试、不阻塞、不因此降级根因</strong>——AI 在这里是个可摘除的器官，摘了人照样活。</p>
+    <p>还有第三层兜底：AI 聊天入口的 <code>_fallback_answer()</code>——未配置 LLM 时，对话面板依然能用本地数据回答「现在哪台机器最不健康」这类问题（fleet_snapshot 直查），回答里明说「AI 未启用」。宁可给一个诚实的本地答案，不给一个转圈。</p>
+    <h3>匿名化：出网前的最后一道闸</h3>
+    <p>ai_outbound 开了、叙事要出网了，文本先过 <code>anonymize()</code>（analysis.py · L230）：</p>
+    <div class="pull">把主机名 / 主机地址 / 任意 IPv4 替换为稳定占位符（同一次调用内映射一致，<b>模型可跨句引用同一实体</b>）。映射表只存在于本次调用的内存里，<b>绝不落库</b>。</div>
+    <p>三个设计点：①占位符落在 <strong>RFC 5737 文档专用段（203.0.113.x）</strong>——这是 IANA 划给文档的网段，永远不会误指真实主机；②「稳定占位符」保证同一次调用里 web-01 永远是同一个假 IP，模型能做跨句推理；③映射表的生命周期 = 一次调用，用完即焚——回读时用 <code>de_anonymize()</code> 换回来，模型到死都不知道真实拓扑。<em>数据不出本机不是一句口号，是一段 40 行的函数。</em></p>
+    <h3>为何这套降级是可信的</h3>
+    <p>把 AI 三态放进 ch1 的决定权表里看：规则（事实）→ 深挖（证据）→ 提案（白名单）三环全部不依赖 AI，AI 只在叙事位。于是失败的爆炸半径被结构性限制住了——它挂它的，卡片照出、分数照算、提案照批。<strong>这不是「AI 失败重试策略」，是「AI 失败不影响任何事」的架构保证。</strong></p>
+    <p>对比一下常见的反面教材：AI 分析是主流程的一环，AI 挂了整个诊断超时，于是人们给 AI 加重试、加缓存、加降级开关——每一步都在给一个本不该居于要害的组件加固。<em>正确的顺序是先把要害挪走，再谈加固。</em></p>
+    <div class="note"><b>与 VOL.10 呼应：</b>总机篇的「宁可明示模拟，不许静默降级」在这里是同一件事的运维版：宁可没有叙事，不许叙事顶替事实。两台机器隔着三个篇章，说的是同一条伦理。</div>
+    <p>诊断卡出完了，最后一步是动手修。而「动手」在这台机器里是被重重围住的一座城——下一章进这道门。</p>
+  </div>
+</section>

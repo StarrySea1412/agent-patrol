@@ -1,0 +1,67 @@
+<header class="wrap masthead">
+  <div class="brand">
+    <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><rect x="4" y="3" width="16" height="18" rx="1.5" stroke="#333e48" stroke-width="1.4"/><path d="M4 8h16M4 13h16M4 18h16" stroke="#333e48" stroke-width="1.1"/><circle cx="8" cy="5.5" r="1" fill="#3f8f5f"/><circle cx="8" cy="10.5" r="1" fill="#d96f1f"/><circle cx="8" cy="15.5" r="1" fill="#3f8f5f"/></svg></span>
+    <span>造物手记 <small>VOL.12</small></span>
+  </div>
+  <div class="edition">
+    <span class="pack"><i class="pack-dot" aria-hidden="true"></i>RACK ELEVATION / 机架立面</span>
+    <span>BOARD 12 · 2026.11</span>
+  </div>
+</header>
+
+<section class="wrap hero">
+  <div>
+    <p class="eyebrow"><span>FIELD NOTES</span>一次造物式的解剖</p>
+    <h1>住进机房<br/><em>的 Agent</em><span class="sub">一台巡检 Agent 的解剖——规则决定事实、AI 只负责说话：五种拨测、一台手写的 DNS 栈、滞后与衰减的告警力学、批准不等于执行的提案门，和数据不出本机的每一道闸</span></h1>
+    <div class="dek-wrap">
+      <p class="dek-tag">本片提要</p>
+      <p class="dek">Grafana 把巡检锁在云里按条收费，Netdata 的 AI 要订阅——这台 Agent 反着来：住进你自己的机器，六千九百行后端，规则引擎先于一切大模型。本篇把它的二十四根骨头逐根拆开：拨测为什么自己手写 DNS 栈、健康分为什么用 0.5ⁿ 衰减、根因卡为什么宁可写「以深挖输出为准」、提案为什么默认 off——每个决定都核对到真实函数。</p>
+    </div>
+    <div class="hero-meta">
+      <span class="pill"><b>24</b> 个后端模块</span>
+      <span class="pill"><b>6799</b> 行 · 只读解剖</span>
+      <span class="pill"><b>5</b> 类拨测 + 0 依赖 DNS</span>
+      <span class="pill"><b>5</b> 条白名单正则</span>
+    </div>
+  </div>
+  <figure class="art">
+    <div class="screen">
+      <div class="screen-img">
+        <img src="assets/art/hero.webp" alt="单眼折纸鸟运维员穿反光背心，举着值班手电站在机房机架列前，机架上一排排 LED 指示灯绿橙相间" width="1152" height="832"/>
+      </div>
+      <div class="tc-bar"><span>RACK 12</span><span class="tc">RULES · PROBES · PROPOSALS</span></div>
+    </div>
+    <figcaption><span><b>FIG. 00</b> 巡检员只带一支手电：先看事实，再谈叙事</span><span>INK &amp; GOUACHE / 2026</span></figcaption>
+  </figure>
+</section>
+
+<section class="stats" aria-label="关键数字">
+  <div class="wrap stats-inner">
+    <div class="stat"><b>0<span>依赖</span></b><small>DNS 栈纯 stdlib 手写：RFC1035 压缩指针 + DoH 复用同一套线格式</small></div>
+    <div class="stat"><b>3/2<span>次</span></b><small>拨测双阈值防抖：连续 3 败才下线，连续 2 成才恢复（Gatus 式）</small></div>
+    <div class="stat"><b>0.5ⁿ<span>衰减</span></b><small>健康分对同类告警指数衰减——堆积不再线性砸穿分数</small></div>
+    <div class="stat"><b>off<span>默认</span></b><small>提案执行开关：批准只记录决策，执行是之后另一个显式动作</small></div>
+  </div>
+</section>
+
+<div class="wrap opening">
+  <div class="prose">
+    <div class="jd-card">
+      <p class="jd-tag">DESIGN NOTE · rules.py 模块注释第一行（原文）</p>
+      <p class="jd-text">「Deterministic rule engine: runs before any LLM. <strong>AI narrates and deep-dives, rules decide facts.</strong>」——确定性规则引擎，先于任何大模型运行；AI 负责叙事与深挖，<em>事实由规则决定</em>。</p>
+      <p class="jd-note" style="margin-top:10px">这行注释是整台 Agent 的宪法，也是它和「把大模型接上监控数据」这类产品的分水岭：分数、告警、根因卡的骨架全部出自确定性代码，AI 的每句话都被钉在「附加视角」的位置上。本篇就沿着这条宪法往下拆。</p>
+    </div>
+    <p class="lead">巡检是运维里最老的一门手艺，也是最容易被「接入大模型」冲昏头的一门。这台 Agent 的做法近乎固执：先写死一套确定性规则——磁盘 85% 警告、95% 严重、恢复必须回落到 80% 以下；再写一台不依赖任何库的 DNS 栈和一段直插 iphlpapi 的 ICMP；健康分对同类告警按 0.5ⁿ 衰减，免得十条「磁盘 86%」把分数砸穿；根因卡的结论永远来自规则事实，AI 叙事挂了就挂着，<em>诊断照常出卡</em>。到最危险的修复环节，它立了全篇最硬的一条铁律：批准只是记录决策，执行是批准之后另一个显式动作——默认关闭，逐段白名单，一切留痕。</p>
+    <p class="scope">标本 · hermes-watch（本机自研，backend/app 24 模块 6799 行，只读解剖未运行）<br/>本文引文核对到真实函数：rules.py / probes.py / analysis.py / executor.py / collector.py<br/>四枚小样全部确定性：判定规则照抄源码，参数摊在明面上。</p>
+    <div class="toc-head"><span>CONTENTS · 七段解剖</span><span>RULES → PROBES → DEEP-DIVE → PROPOSALS</span></div>
+    <nav class="toc">
+      <a href="#ch1"><i>01</i><span>规则决定事实，AI 负责说话<small>rules.py 先于一切大模型；findings 与叙事的分工</small></span></a>
+      <a href="#ch2"><i>02</i><span>告警也会发抖<small>Netdata CLEAR 滞后阈值治 flapping，0.5ⁿ 治分数砸穿</small></span></a>
+      <a href="#ch3"><i>03</i><span>五种拨测与一台手写的 DNS 栈<small>纯 stdlib、IcmpSendEcho 的 64 位坑、健康分隔离</small></span></a>
+      <a href="#ch4"><i>04</i><span>深挖：证据是跑出来的<small>DEEP_DIVE 只读探针、根因陈述不猜未验证的成因</small></span></a>
+      <a href="#ch5"><i>05</i><span>根因卡与优雅降级<small>card 六字段、AI 三态、匿名化与 RFC 5737</small></span></a>
+      <a href="#ch6"><i>06</i><span>提案：批准不是执行<small>五条白名单正则、逐段校验、propose_exec 默认 off</small></span></a>
+      <a href="#ch7"><i>07</i><span>数据不出本机<small>采集只读、ai_outbound 门控、映射表绝不落库</small></span></a>
+    </nav>
+  </div>
+</div>

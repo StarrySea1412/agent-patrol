@@ -1,0 +1,1084 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<meta name="color-scheme" content="light"/>
+<meta name="theme-color" content="#f3eee2"/>
+<link rel="preload" href="assets/fonts/wenkai-regular.woff2" as="font" type="font/woff2" crossorigin/>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' fill='%23f1f0ea'/%3E%3Crect x='4' y='3' width='16' height='18' rx='1.5' fill='none' stroke='%23333e48' stroke-width='1.4'/%3E%3Cpath d='M4 8h16M4 13h16M4 18h16' stroke='%23333e48' stroke-width='1.1'/%3E%3Ccircle cx='8' cy='5.5' r='1' fill='%233f8f5f'/%3E%3Ccircle cx='8' cy='10.5' r='1' fill='%23d96f1f'/%3E%3Ccircle cx='8' cy='15.5' r='1' fill='%233f8f5f'/%3E%3C/svg%3E"/>
+<meta name="description" content="模型路由与降级的解剖：从一次凌晨的 503 假死讲起，拆开错误分类、按角色路由、双层回退、熔断冷却、探测留痕与成本账本——两个真实标本、二十三条真实探测记录、四枚确定性小样。"/>
+<meta name="author" content="StarrySea1412"/>
+<meta property="og:title" content="给 Agent 配一台总机 · 造物手记 VOL.10"/>
+<meta property="og:description" content="模型挂了之后发生什么：六类错误两种药、重试包在换人里、熔断冷却 60 秒、以及「不许静默降级」背后的价值观。"/>
+<meta property="og:type" content="article"/>
+<meta property="og:image" content="assets/art/hero.webp"/>
+<title>给 Agent 配一台总机 · 造物手记 VOL.10</title>
+<style>
+/* 《住进机房的 Agent》· 造物手记 VOL.12
+   机架走线图：机房纸、石墨蓝黑、安全橙、LED 绿 —— 一面挂满巡检面板的机架立面。 */
+@font-face{font-family:"LXGW WenKai";src:url("assets/fonts/wenkai-regular.woff2") format("woff2");font-weight:300 599;font-style:normal;font-display:swap}
+@font-face{font-family:"LXGW WenKai";src:url("assets/fonts/wenkai-medium.woff2") format("woff2");font-weight:600 900;font-style:normal;font-display:swap}
+:root{
+  --paper:#f1f0ea;--paper-deep:#e7e5da;--card:#faf9f3;--card2:#f1efe4;
+  --ink:#2a3138;--ink-soft:#4d565e;--muted:#7b8288;--faint:#a6a89f;
+  --line:#d8d6cb;--line-soft:#e4e2d5;--line-strong:#b7b5a6;
+  --rail:#333e48;--rail-deep:#25303a;--rail-soft:rgba(51,62,72,.1);--rail-line:rgba(51,62,72,.4);
+  --signal:#d96f1f;--signal-soft:rgba(217,111,31,.1);
+  --clock:#3f8f5f;--clock-soft:rgba(63,143,95,.12);
+  --steel:#5d6d74;--amber:#a8842c;--amber-soft:rgba(168,132,44,.12);--steel-soft:rgba(93,109,116,.11);
+  --plum:#77588a;--plum-soft:rgba(119,88,138,.1);
+  --code-bg:#232a2e;--code-ink:#cfd6d3;
+  --serif:"LXGW WenKai","Songti SC","STSong","Noto Serif CJK SC",serif;
+  --sans:"LXGW WenKai",-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+  --mono:ui-monospace,"SFMono-Regular",Consolas,"Liberation Mono",monospace;
+  --hard:4px 4px 0 rgba(84,92,88,.16);
+  --hard-sm:2px 2px 0 rgba(84,92,88,.15);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth;scroll-padding-top:26px}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);line-height:1.95;-webkit-font-smoothing:antialiased;text-spacing:ideograph-alpha;
+  background-image:
+    radial-gradient(circle,rgba(70,80,78,.1) 1.1px,transparent 1.3px),
+    radial-gradient(circle,rgba(70,80,78,.055) 1.1px,transparent 1.3px),
+    linear-gradient(rgba(51,62,72,.05) 1px,transparent 1px);
+  background-size:26px 26px,104px 104px,100% 92px;
+  background-position:-1px -1px}
+::selection{background:#f0e2c8;color:#2a2410}
+a{color:var(--rail-deep);text-underline-offset:4px;text-decoration-thickness:1px}
+a:hover{color:var(--signal)}
+button,a,input,select{touch-action:manipulation}
+button{cursor:pointer;color:inherit;font:inherit}
+button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid var(--signal);outline-offset:3px}
+img{display:block;max-width:100%;height:auto}
+p{margin:0 0 1.22em}
+h1,h2,h3,h4{line-height:1.45;text-wrap:balance;margin:0}
+h1,h2,h3{font-family:var(--serif)}
+strong{font-weight:650;color:#1d2429}
+code{font-family:var(--mono);font-size:.85em;background:var(--rail-soft);color:#2b4a50;padding:.1em .36em;border-radius:2px;overflow-wrap:anywhere;border-bottom:1px solid rgba(53,86,92,.2)}
+em{font-style:normal;color:var(--signal);background:linear-gradient(transparent 62%,rgba(217,111,31,.15) 62%)}
+.progress{position:fixed;inset:0 auto auto 0;height:3px;width:100%;background:linear-gradient(90deg,var(--rail),var(--clock),var(--signal));transform:scaleX(0);transform-origin:left;z-index:60;pointer-events:none}
+.wrap{max-width:1180px;margin:auto;padding-inline:36px}
+
+/* masthead + hero + stats */
+.masthead{display:flex;align-items:center;justify-content:space-between;gap:18px;padding-block:20px 14px;border-bottom:1.5px solid var(--line-strong);font-size:12px;letter-spacing:.09em;color:var(--muted)}
+.brand{display:flex;align-items:center;gap:11px;font-weight:650;color:var(--ink)}
+.brand-mark{width:25px;height:25px;display:grid;place-items:center;border:1.5px solid var(--line-strong);border-radius:2px;background:var(--card);box-shadow:var(--hard-sm)}
+.brand-mark svg{width:16px;height:16px;display:block}
+.brand small{font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--signal);font-weight:700}
+.edition{font-family:var(--mono);font-size:10.5px;letter-spacing:.07em;display:flex;gap:14px;align-items:center}
+.edition .pack{display:inline-flex;align-items:center;gap:7px;color:var(--rail-deep)}
+.pack-dot{width:8px;height:8px;border:1.5px solid var(--signal);background:var(--signal-soft);transform:rotate(45deg)}
+.hero{padding-block:52px 38px;display:grid;grid-template-columns:1.06fr .94fr;gap:50px;align-items:center}
+.eyebrow{display:inline-flex;align-items:center;gap:10px;font-family:var(--mono);font-size:10.5px;letter-spacing:.09em;color:var(--muted);margin:0 0 22px;background:var(--card);border:1px dashed var(--rail-line);padding:6px 13px 6px 8px;border-radius:2px}
+.eyebrow span{color:var(--rail-deep);letter-spacing:.15em;font-weight:700;padding-right:11px;border-right:1px dashed var(--rail-line)}
+.hero h1{font-size:clamp(44px,5vw,70px);font-weight:800;line-height:1.14;letter-spacing:-.035em;margin:0 0 20px}
+.hero h1 em{color:var(--rail-deep);background:none}
+.hero h1 .sub{display:block;font-size:.4em;font-weight:400;letter-spacing:.02em;color:var(--ink-soft);margin-top:14px;line-height:1.72}
+.dek-wrap{margin:0 0 24px;max-width:566px;border-left:3px solid var(--signal);padding-left:18px}
+.dek-tag{font-family:var(--mono);font-size:11px;font-weight:700;color:var(--signal);letter-spacing:.09em;margin:0 0 8px}
+.dek{font-size:16.5px;line-height:1.9;color:var(--ink-soft);margin:0}
+.hero-meta{display:flex;flex-wrap:wrap;gap:8px}
+.pill{font-family:var(--mono);font-size:10.5px;letter-spacing:.04em;color:var(--muted);border:1px solid var(--line);border-radius:2px;padding:6px 11px;background:var(--card);box-shadow:var(--hard-sm)}
+.pill b{color:var(--ink);font-weight:700}
+.art{margin:0;position:relative}
+.screen{border:1.5px solid var(--ink);background:var(--card);padding:9px;box-shadow:6px 6px 0 rgba(84,92,88,.2);border-radius:2px}
+.screen-img{position:relative;overflow:hidden;background:#e6e3d6;border:1px solid var(--line)}
+.screen-img img{width:100%;aspect-ratio:4/3;object-fit:cover;filter:saturate(.96)}
+.screen-img::after{content:"";position:absolute;inset:0;pointer-events:none;background:linear-gradient(rgba(51,62,72,.05),rgba(168,132,44,.05));mix-blend-mode:multiply}
+.tc-bar{display:flex;justify-content:space-between;align-items:center;gap:10px;font-family:var(--mono);font-size:10px;letter-spacing:.05em;color:var(--muted);padding:8px 3px 1px}
+.tc-bar .tc{color:var(--rail-deep)}
+.art figcaption{font-size:11.5px;color:var(--faint);margin-top:9px;line-height:1.7;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;font-family:var(--mono);letter-spacing:.02em}
+.art figcaption b{color:var(--signal);font-weight:700}
+.stats{border-block:1.5px solid var(--line-strong);background:rgba(250,249,242,.75)}
+.stats-inner{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--line)}
+.stat{background:var(--card);padding:15px 20px}
+.stat b{display:block;font-family:var(--mono);font-size:23px;letter-spacing:-.02em;color:var(--rail-deep);line-height:1.25}
+.stat b span{font-size:11px;color:var(--faint);letter-spacing:.04em;margin-left:3px}
+.stat small{display:block;font-size:11px;color:var(--muted);letter-spacing:.03em;margin-top:3px}
+
+/* opening + toc + chapters */
+.opening{padding-block:46px 18px}
+.jd-card{margin:0 0 28px;border:1px solid var(--line-strong);border-left:4px solid var(--signal);background:var(--card);padding:15px 19px 12px;border-radius:2px;box-shadow:var(--hard)}
+.jd-tag{font-family:var(--mono);font-size:10px;letter-spacing:.09em;color:var(--faint);margin:0 0 8px}
+.jd-text{font-size:16px;line-height:1.95;color:var(--ink);margin:0 0 8px}
+.jd-note{font-size:12px;color:var(--muted);margin:0;line-height:1.8}
+.jd-list{margin:12px 0 0;padding:0;list-style:none;display:grid;gap:7px}
+.jd-list li{font-size:13.5px;line-height:1.8;color:var(--ink-soft);display:grid;grid-template-columns:34px 1fr;gap:10px;align-items:baseline}
+.jd-list li i{font-style:normal;font-family:var(--mono);font-size:11px;color:var(--signal);font-weight:700}
+.lead{font-size:19.5px;line-height:1.96;color:var(--ink)}
+.lead::first-letter{float:left;font-size:62px;line-height:.86;padding:8px 12px 0 0;color:var(--signal);font-weight:800}
+.scope{font-size:12.5px;color:var(--muted);border-top:1px solid var(--line);padding-top:14px;margin-top:26px;font-family:var(--mono);line-height:1.85}
+.toc-head{display:flex;justify-content:space-between;align-items:baseline;border-bottom:1px solid var(--line-strong);padding-bottom:8px;margin:30px 0 0;font-family:var(--mono);font-size:11px;letter-spacing:.11em;color:var(--faint)}
+.toc{display:grid;grid-template-columns:repeat(2,1fr);gap:1px;background:var(--line);border:1px solid var(--line);border-top:0;margin:0 0 54px}
+.toc a{background:var(--card);padding:13px 17px;text-decoration:none;color:var(--ink);display:grid;grid-template-columns:56px 1fr;gap:11px;align-items:baseline;transition:background .16s}
+.toc a:hover{background:var(--card2);color:var(--ink)}
+.toc a i{font-family:var(--mono);font-style:normal;font-size:10.5px;color:var(--signal);letter-spacing:.03em}
+.toc a span{font-size:14px}
+.toc a small{display:block;font-size:11px;color:var(--faint);margin-top:2px;line-height:1.6}
+.chapter{padding-block:48px 16px;border-top:1px solid var(--line)}
+.ch-head{display:grid;grid-template-columns:88px 1fr;gap:22px;align-items:start;margin:0 auto 30px;max-width:980px}
+.ch-num{font-family:var(--mono);font-size:13px;color:var(--rail-deep);letter-spacing:.06em;padding-top:12px;border-top:2px solid var(--rail);line-height:1.5}
+.ch-num b{display:block;font-size:33px;color:var(--ink);letter-spacing:-.02em;font-weight:700;line-height:1.1}
+.ch-title h2{font-size:clamp(29px,3.3vw,42px);font-weight:750;letter-spacing:-.024em;line-height:1.25}
+.ch-title p{color:var(--muted);font-size:14px;margin:8px 0 0;line-height:1.8;max-width:640px}
+.ch-body{max-width:768px;margin-inline:auto}
+.ch-body h3{font-size:22px;font-weight:700;margin:40px 0 13px;letter-spacing:-.01em;padding-left:12px;border-left:3px solid var(--signal)}
+.ch-body h4{font-size:16px;font-weight:650;margin:24px 0 8px;color:var(--rail-deep)}
+.ch-body ul,.ch-body ol{padding-left:1.35em;margin:0 0 1.25em}
+.ch-body li{margin:.38em 0}
+.ch-body li::marker{color:var(--signal)}
+.lede{font-size:17px;color:var(--ink-soft);line-height:1.95}
+.pull{border-left:3px solid var(--signal);background:linear-gradient(90deg,var(--signal-soft),transparent 72%);padding:16px 21px;margin:26px 0;font-family:var(--serif);font-size:19px;line-height:1.85;color:var(--ink)}
+.pull b{color:var(--signal);font-weight:700}
+.note{font-size:13px;color:var(--muted);border-left:2px solid var(--line-strong);padding-left:14px;margin:20px 0;line-height:1.85}
+.note b{color:var(--ink-soft)}
+.fig{margin:30px auto;max-width:980px;position:relative;left:50%;transform:translateX(-50%);width:min(940px,calc(100vw - 72px))}
+.fig .frame{border:1.5px solid var(--line-strong);background:var(--card);padding:14px;box-shadow:var(--hard);border-radius:2px}
+.fig figcaption{font-family:var(--mono);font-size:11.5px;color:var(--faint);letter-spacing:.02em;margin-top:8px;line-height:1.75;display:flex;gap:10px;align-items:baseline}
+.fig figcaption b{color:var(--signal);font-weight:700}
+.layers-cap{font-family:var(--mono);font-size:10.5px;letter-spacing:.07em;color:var(--faint);margin:0 0 13px}
+.layers{display:grid;gap:0}
+.layer{display:grid;grid-template-columns:10px 44px 128px 1fr;gap:10px;align-items:stretch;border:1px solid var(--line);border-top:0;background:var(--card);padding:11px 14px}
+.layer:first-of-type{border-top:1px solid var(--line)}
+.layer i{font-style:normal;font-family:var(--mono);font-size:11px;color:var(--faint);padding-top:2px}
+.layer b{font-size:14px;line-height:1.5}
+.layer b small{display:block;font-family:var(--mono);font-size:9.5px;color:var(--faint);font-weight:400;letter-spacing:.05em;margin-top:2px}
+.layer p{margin:0;font-size:12.8px;line-height:1.72;color:var(--ink-soft)}
+.layer p code{font-size:11px}
+.layer-mark{width:8px;border-radius:1px;margin-block:-11px;margin-left:-14px}
+.lm-1{background:var(--rail)}.lm-2{background:var(--steel)}.lm-3{background:var(--clock)}.lm-4{background:var(--signal)}.lm-5{background:var(--plum)}.lm-6{background:#6f6a50}
+
+/* code + table + demo chrome */
+.code{margin:22px 0;border:1.5px solid #2a3134;background:var(--code-bg);border-radius:3px;overflow:hidden;box-shadow:var(--hard)}
+.code-bar{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:7px 12px;border-bottom:1px solid #394247;font-family:var(--mono);font-size:10px;letter-spacing:.05em;color:#95a3a0;background:#2b3438}
+.code-bar b{color:#d8c07a;font-weight:600}
+.code pre{margin:0;padding:14px 15px 16px;overflow-x:auto;font-family:var(--mono);font-size:12.3px;line-height:1.76;color:var(--code-ink);tab-size:2}
+.code pre .c{color:#6f7d78;font-style:italic}
+.code pre .k{color:#8fc4d0}
+.code pre .s{color:#c9bd84}
+.code pre .n{color:#e0a25c}
+.code pre .f{color:#9fd0b8}
+.tablewrap{overflow-x:auto;margin:22px 0;border:1px solid var(--line-strong);border-radius:2px;background:var(--card);box-shadow:var(--hard-sm)}
+table{border-collapse:collapse;width:100%;font-size:13.4px;min-width:560px}
+th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line-soft);vertical-align:top;line-height:1.7}
+th{background:var(--card2);font-family:var(--mono);font-size:10px;letter-spacing:.07em;color:var(--muted);font-weight:700}
+tr:last-child td{border-bottom:0}
+td b{color:#1d2429;font-weight:650}
+td code{font-size:11.3px}
+td.ok{color:var(--rail-deep)}td.warn{color:var(--clock)}
+.num{font-family:var(--mono);font-size:12.4px;color:var(--rail-deep);white-space:nowrap}
+.demo{max-width:1000px;margin:40px auto;border:1.5px solid var(--line-strong);background:var(--card);border-radius:3px;overflow:hidden;box-shadow:var(--hard)}
+.demo-head{display:flex;justify-content:space-between;align-items:center;gap:14px;padding:10px 16px;border-bottom:1px solid var(--line);background:var(--card2);flex-wrap:wrap}
+.demo-tag{font-family:var(--mono);font-size:10px;letter-spacing:.09em;color:var(--signal);font-weight:700}
+.demo-title{font-size:15px;font-weight:650;margin-left:auto;display:flex;align-items:center;gap:9px}
+.demo-title .hint{font-family:var(--mono);font-size:10px;color:var(--faint);font-weight:400;letter-spacing:.02em}
+.demo-body{padding:16px 17px 15px}
+.controls{display:flex;flex-wrap:wrap;gap:14px 22px;align-items:flex-end;padding-bottom:13px;border-bottom:1px solid var(--line-soft);margin-bottom:13px}
+.ctl{min-width:140px;flex:1}
+.ctl-btn{flex:0 0 auto;display:flex;gap:7px;flex-wrap:wrap;align-items:center}
+.ctl label{display:flex;justify-content:space-between;align-items:baseline;font-family:var(--mono);font-size:10px;letter-spacing:.05em;color:var(--muted);margin-bottom:5px}
+.ctl label b{color:var(--rail-deep);font-weight:700;font-size:12px}
+button.run{background:var(--rail);color:#f6f8f5;font-weight:700;border:0;border-radius:2px;padding:8px 15px;font-size:13px;letter-spacing:.02em;box-shadow:var(--hard-sm)}
+button.run:hover{background:var(--rail-deep)}
+button.ghost{background:transparent;border:1px solid var(--line-strong);color:var(--muted);border-radius:2px;padding:8px 13px;font-size:12.5px}
+button.ghost:hover:not(:disabled){border-color:var(--signal);color:var(--signal)}
+button.ghost:disabled{opacity:.42;cursor:not-allowed}
+input[type=range]{appearance:none;width:100%;height:22px;background:transparent;cursor:pointer}
+input[type=range]::-webkit-slider-runnable-track{height:3px;background:var(--line-strong);border-radius:2px}
+input[type=range]::-webkit-slider-thumb{appearance:none;width:14px;height:14px;border-radius:50%;background:var(--rail);border:2px solid var(--card);margin-top:-6px;box-shadow:0 0 0 1px var(--rail)}
+input[type=text],select{background:var(--card);border:1px solid var(--line-strong);border-radius:2px;padding:7px 9px;font-family:var(--sans);font-size:13.4px;color:var(--ink);width:100%}
+input[type=text]:focus,select:focus{outline:2px solid var(--signal);outline-offset:1px}
+.switch{display:inline-flex;align-items:center;gap:8px;font-family:var(--mono);font-size:10.5px;color:var(--muted);letter-spacing:.01em;cursor:pointer;user-select:none}
+.switch input{appearance:none;width:32px;height:17px;border-radius:9px;background:var(--line-strong);position:relative;cursor:pointer;transition:background .16s}
+.switch input::after{content:"";position:absolute;top:2px;left:2px;width:13px;height:13px;border-radius:50%;background:#fff;transition:transform .16s}
+.switch input:checked{background:var(--rail)}
+.switch input:checked::after{transform:translateX(15px)}
+.hintline{font-family:var(--mono);font-size:10.5px;color:var(--faint);line-height:1.7}
+.demo-foot{border-top:1px solid var(--line-soft);padding:9px 16px;font-family:var(--mono);font-size:10px;color:var(--faint);letter-spacing:.01em;line-height:1.75}
+.demo-foot b{color:var(--rail-deep);font-weight:600}
+
+/* epilogue */
+.epilogue{max-width:768px;margin:0 auto;padding-block:36px 16px}
+.epilogue h2{font-size:clamp(27px,3vw,37px);margin-bottom:15px}
+.rules{display:grid;gap:9px;margin:22px 0 26px}
+.rule{border:1px solid var(--line-strong);border-left:3px solid var(--rail);background:var(--card);border-radius:0 2px 2px 0;padding:13px 16px;box-shadow:var(--hard-sm)}
+.rule b{display:block;font-family:var(--mono);font-size:10.5px;letter-spacing:.09em;color:var(--rail-deep);margin-bottom:4px}
+.rule p{margin:0;font-size:14.5px;color:var(--ink-soft);line-height:1.82}
+.limits{border-top:1px solid var(--line);padding-top:17px;font-size:13.5px;color:var(--muted)}
+.limits b{color:var(--ink-soft)}
+.links{display:flex;flex-wrap:wrap;gap:8px;margin:22px 0 7px}
+.links a{font-family:var(--mono);font-size:11px;letter-spacing:.02em;border:1px solid var(--line-strong);padding:6px 11px;text-decoration:none;color:var(--rail-deep);background:var(--card);border-radius:2px}
+.links a:hover{border-color:var(--signal);color:var(--signal)}
+.site-foot{border-top:1.5px solid var(--line-strong);margin-top:48px;padding-block:20px 34px;display:flex;justify-content:space-between;gap:18px;flex-wrap:wrap;font-family:var(--mono);font-size:10.5px;letter-spacing:.03em;color:var(--faint)}
+.site-foot a{color:var(--muted)}
+.foot-note{font-size:10.5px;color:#8b8b7c;line-height:1.8;max-width:600px}
+
+@media (max-width:980px){
+  .hero{grid-template-columns:1fr;gap:28px;padding-block:38px 28px}
+  .hero h1{font-size:clamp(38px,7.6vw,54px)}
+  .stats-inner{grid-template-columns:repeat(2,1fr)}
+  .ch-head{grid-template-columns:62px 1fr;gap:15px}
+  .ch-num b{font-size:25px}
+  .ad-wrap,.tk-wrap,.ef-wrap,.pw-wrap{grid-template-columns:1fr}
+  .toc{grid-template-columns:1fr}
+  .layer{grid-template-columns:10px 34px 1fr;grid-template-rows:auto auto;gap:6px 10px}
+  .layer i{grid-row:1}
+  .layer b{grid-column:3}
+  .layer p{grid-column:3;grid-row:2}
+  .layer-mark{margin-block:-11px}
+  .ef-readout{grid-template-columns:repeat(2,1fr)}
+  .pw-choose{grid-template-columns:1fr}
+}
+@media (max-width:620px){
+  .wrap{padding-inline:16px}
+  .masthead{font-size:10px;letter-spacing:.04em}
+  .edition .pack{display:none}
+  .hero h1{font-size:36px}
+  .lead{font-size:17.5px}
+  .ch-head{grid-template-columns:1fr;gap:5px}
+  .ch-num{border-top:0;padding-top:0;display:flex;align-items:baseline;gap:9px}
+  .ch-num b{font-size:21px}
+  .ch-title h2{font-size:26px}
+  .ch-body h3{font-size:19px}
+  .demo-body{padding:11px}
+  .demo-title .hint{display:none}
+  .code pre{font-size:11.2px}
+  .fig{width:calc(100vw - 32px)}
+  .ctl-btn{flex-wrap:wrap;max-width:100%}
+  .ctl-btn button{padding:7px 11px;font-size:12px;flex:0 1 auto}
+}
+@media (prefers-reduced-motion:reduce){
+  html{scroll-behavior:auto}
+  *,*::before,*::after{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important}
+}
+@media print{body{background:#fff}.progress,.demo,.art,.links,.toc,.site-foot{display:none}}
+
+/* ══ D1 拨测状态机 pm-* ══ */
+.pm-wrap{display:grid;grid-template-columns:1fr 262px;gap:14px}
+.pm-stage{border:1.5px solid var(--line-strong);border-radius:3px;background:var(--card);padding:14px;box-shadow:var(--hard-sm)}
+.pm-state{display:inline-flex;align-items:baseline;gap:9px;font-family:var(--mono);font-weight:800;font-size:20px;border:2px solid;border-radius:3px;padding:6px 14px;box-shadow:var(--hard-sm)}
+.pm-state .zh{font-size:11px;font-weight:400;letter-spacing:.08em}
+.pm-state.up{color:var(--clock);border-color:var(--clock);background:rgba(63,143,95,.1)}
+.pm-state.down{color:var(--alarm);border-color:var(--alarm);background:rgba(217,111,31,.1)}
+.pm-lights{display:flex;gap:5px;margin:13px 0 4px}
+.pm-light{width:20px;height:8px;border-radius:2px;background:var(--line);border:1px solid var(--line-strong)}
+.pm-light.f{background:var(--alarm);border-color:var(--alarm)}
+.pm-light.s{background:var(--clock);border-color:var(--clock)}
+.pm-counter-lbl{font-family:var(--mono);font-size:9.5px;color:var(--muted);letter-spacing:.05em}
+.pm-log{font-family:var(--mono);font-size:9.8px;line-height:1.75;color:var(--muted);background:var(--card2);border:1px solid var(--line);border-radius:2px;padding:7px 9px;min-height:150px;max-height:220px;overflow-y:auto;white-space:pre-wrap;overflow-wrap:anywhere;margin-top:11px}
+.pm-log .bad{color:var(--alarm)}
+.pm-log .good{color:var(--clock)}
+.pm-log .cool{color:var(--rail);font-weight:700}
+.pm-side{border:1px solid var(--line);border-radius:2px;background:var(--card2);padding:11px 12px;display:flex;flex-direction:column;gap:8px}
+.pm-side h5{margin:0;font-family:var(--mono);font-size:10px;letter-spacing:.07em;color:var(--faint);font-weight:700}
+.pm-btnrow{display:flex;gap:6px;flex-wrap:wrap}
+.pm-btnrow button{padding:6px 10px;font-size:11.5px}
+.pm-kv{display:grid;grid-template-columns:1fr auto;gap:2px 8px;font-family:var(--mono);font-size:10px;color:var(--muted);line-height:1.7}
+.pm-kv b{color:var(--ink);text-align:right}
+.pm-kv b.yes{color:var(--clock)}.pm-kv b.no{color:var(--alarm)}
+
+/* ══ D2 健康分秤 hs-* ══ */
+.hs-wrap{display:grid;grid-template-columns:250px 1fr;gap:14px}
+.hs-score{border:1.5px solid var(--line-strong);border-radius:3px;background:var(--card);padding:16px;text-align:center;box-shadow:var(--hard-sm)}
+.hs-big{font-family:var(--mono);font-size:56px;font-weight:800;letter-spacing:-.03em;line-height:1.05}
+.hs-big.ok{color:var(--clock)}.hs-big.warn{color:var(--amber)}.hs-big.crit{color:var(--alarm)}
+.hs-status{font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;color:var(--muted);margin-top:4px}
+.hs-add{display:flex;gap:5px;flex-wrap:wrap;margin-top:13px;justify-content:center}
+.hs-add button{padding:5px 9px;font-size:10.5px;font-family:var(--mono)}
+.hs-list{font-family:var(--mono);font-size:9.8px;line-height:1.8;color:var(--muted);margin-top:11px;max-height:150px;overflow-y:auto;text-align:left}
+.hs-list b{color:var(--alarm)}
+.hs-chart{border:1px solid var(--line-strong);border-radius:2px;background:var(--card);padding:10px 12px}
+.hs-svg{width:100%;height:170px;display:block}
+.hs-legend{display:flex;gap:14px;flex-wrap:wrap;font-family:var(--mono);font-size:10px;color:var(--faint);margin-top:8px}
+.hs-legend span::before{content:"";display:inline-block;width:14px;height:3px;margin-right:5px;vertical-align:3px}
+.hs-legend .a::before{background:var(--alarm)}
+.hs-legend .b::before{background:var(--rail)}
+.hs-note{margin-top:9px;font-size:12px;line-height:1.75;color:var(--ink-soft);border-left:2px solid var(--rail);padding-left:10px}
+.hs-note b{color:var(--rail)}
+.hs-switch{margin-top:10px}
+
+/* ══ D3 根因卡生成器 rc-* ══ */
+.rc-wrap{display:grid;grid-template-columns:236px 1fr;gap:14px}
+.rc-types{display:flex;flex-direction:column;gap:5px}
+.rc-type{border:1px solid var(--line);background:var(--card);border-radius:2px;padding:8px 10px;text-align:left;cursor:pointer}
+.rc-type b{font-size:12.5px;display:flex;justify-content:space-between;align-items:center}
+.rc-type b em{font-style:normal;font-family:var(--mono);font-size:9px;font-weight:700;border:1px solid;border-radius:2px;padding:1px 5px}
+.rc-type small{display:block;font-size:10.5px;color:var(--muted);line-height:1.6;margin-top:2px}
+.rc-type[aria-pressed=true]{border-color:var(--rail);background:rgba(51,62,72,.06)}
+.rc-card{border:1.5px solid var(--line-strong);border-radius:3px;background:var(--card);padding:13px 15px;box-shadow:var(--hard-sm)}
+.rc-chain{display:flex;flex-wrap:wrap;gap:4px;align-items:center;font-family:var(--mono);font-size:10px;color:var(--ink-soft);margin-bottom:10px}
+.rc-chain i{font-style:normal;color:var(--alarm)}
+.rc-chain span{border:1px solid var(--line);background:var(--card2);border-radius:2px;padding:2px 7px}
+.rc-root{font-size:13.5px;line-height:1.8;color:var(--ink)}
+.rc-root b{color:var(--rail)}
+.rc-steps{margin-top:10px;border:1px solid var(--line);border-radius:2px;background:var(--code-bg);padding:9px 11px;font-family:var(--mono);font-size:10px;line-height:1.8;color:#cfd6d3;white-space:pre-wrap;overflow-wrap:anywhere;max-height:190px;overflow-y:auto}
+.rc-steps .cmd{color:#9fc4ae}
+.rc-steps .dim{color:#7d8a85}
+.rc-ai{margin-top:10px;border-left:3px solid #77588a;background:rgba(119,88,138,.07);padding:8px 11px;font-size:12.5px;line-height:1.75;color:var(--ink-soft)}
+.rc-ai b{color:#77588a}
+.rc-ai.err{border-color:var(--alarm);background:rgba(217,111,31,.08)}
+.rc-ai.err b{color:var(--alarm)}
+.rc-foot{margin-top:10px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-family:var(--mono);font-size:10px;color:var(--faint)}
+.rc-foot .conf{border:1px solid var(--clock);color:var(--clock);border-radius:2px;padding:1px 7px;font-weight:700}
+.rc-foot .conf.mid{border-color:var(--amber);color:var(--amber)}
+.rc-foot .prop{border:1px dashed var(--rail);color:var(--rail);border-radius:2px;padding:1px 7px}
+
+/* ══ D4 命令安检门 gw-* ══ */
+.gw-wrap{display:grid;grid-template-columns:1fr 288px;gap:14px}
+.gw-in{display:flex;flex-direction:column;gap:9px}
+.gw-input{display:flex;gap:7px}
+.gw-input input{flex:1;font-family:var(--mono);font-size:12.5px}
+.gw-cases{display:flex;gap:5px;flex-wrap:wrap}
+.gw-cases button{padding:4px 9px;font-size:10.5px;font-family:var(--mono)}
+.gw-verdict{display:flex;align-items:center;gap:9px;font-family:var(--mono);font-weight:800;font-size:15px;border:2px solid;border-radius:3px;padding:7px 13px;width:fit-content;box-shadow:var(--hard-sm)}
+.gw-verdict.allow{color:var(--clock);border-color:var(--clock);background:rgba(63,143,95,.1)}
+.gw-verdict.deny{color:var(--alarm);border-color:var(--alarm);background:rgba(217,111,31,.1)}
+.gw-verdict small{font-size:10.5px;font-weight:400;letter-spacing:.06em}
+.gw-segs{margin-top:11px;display:flex;flex-direction:column;gap:6px}
+.gw-seg{display:grid;grid-template-columns:22px 1fr 92px;gap:9px;align-items:center;border:1px solid var(--line);border-radius:2px;background:var(--card);padding:7px 10px}
+.gw-seg .mk{font-family:var(--mono);font-weight:800;text-align:center;font-size:14px}
+.gw-seg.ok .mk{color:var(--clock)}
+.gw-seg.bad .mk{color:var(--alarm)}
+.gw-seg.bad{background:rgba(217,111,31,.07)}
+.gw-seg code{font-family:var(--mono);font-size:11.5px;color:var(--ink);overflow-wrap:anywhere}
+.gw-seg .risk{font-family:var(--mono);font-size:9.5px;text-align:right;white-space:nowrap}
+.gw-seg .risk em{font-style:normal;font-weight:700;border:1px solid;border-radius:2px;padding:1px 5px}
+.gw-seg .risk em.lo{color:var(--clock);border-color:var(--clock)}
+.gw-seg .risk em.mid{color:var(--amber);border-color:var(--amber)}
+.gw-seg .risk em.hi{color:var(--alarm);border-color:var(--alarm)}
+.gw-audit{font-family:var(--mono);font-size:9.8px;line-height:1.75;color:var(--muted);background:var(--card2);border:1px dashed var(--line-strong);border-radius:2px;padding:8px 10px;margin-top:11px;white-space:pre-wrap;overflow-wrap:anywhere}
+.gw-audit b{color:var(--alarm)}
+.gw-side{border:1px solid var(--line);border-radius:2px;background:var(--card2);padding:11px 12px}
+.gw-side h5{margin:0 0 8px;font-family:var(--mono);font-size:10px;letter-spacing:.07em;color:var(--faint);font-weight:700}
+.gw-rule{font-family:var(--mono);font-size:9.8px;line-height:1.7;border-bottom:1px dashed var(--line);padding-block:5px;color:var(--ink-soft)}
+.gw-rule b{color:var(--rail);display:block;font-size:10.5px}
+.gw-rule em{font-style:normal;color:var(--amber);font-weight:700}
+.gw-rule .hi{color:var(--alarm)}
+.gw-rule:last-child{border-bottom:0}
+@media (max-width:980px){
+  .pm-wrap,.hs-wrap,.rc-wrap,.gw-wrap{grid-template-columns:1fr}
+}
+
+</style>
+</head>
+<body>
+<div class="progress" id="progress"></div>
+<header class="wrap masthead">
+  <div class="brand">
+    <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><rect x="4" y="3" width="16" height="18" rx="1.5" stroke="#333e48" stroke-width="1.4"/><path d="M4 8h16M4 13h16M4 18h16" stroke="#333e48" stroke-width="1.1"/><circle cx="8" cy="5.5" r="1" fill="#3f8f5f"/><circle cx="8" cy="10.5" r="1" fill="#d96f1f"/><circle cx="8" cy="15.5" r="1" fill="#3f8f5f"/></svg></span>
+    <span>造物手记 <small>VOL.12</small></span>
+  </div>
+  <div class="edition">
+    <span class="pack"><i class="pack-dot" aria-hidden="true"></i>RACK ELEVATION / 机架立面</span>
+    <span>BOARD 12 · 2026.11</span>
+  </div>
+</header>
+
+<section class="wrap hero">
+  <div>
+    <p class="eyebrow"><span>FIELD NOTES</span>一次造物式的解剖</p>
+    <h1>住进机房<br/><em>的 Agent</em><span class="sub">一台巡检 Agent 的解剖——规则决定事实、AI 只负责说话：五种拨测、一台手写的 DNS 栈、滞后与衰减的告警力学、批准不等于执行的提案门，和数据不出本机的每一道闸</span></h1>
+    <div class="dek-wrap">
+      <p class="dek-tag">本片提要</p>
+      <p class="dek">Grafana 把巡检锁在云里按条收费，Netdata 的 AI 要订阅——这台 Agent 反着来：住进你自己的机器，六千九百行后端，规则引擎先于一切大模型。本篇把它的二十四根骨头逐根拆开：拨测为什么自己手写 DNS 栈、健康分为什么用 0.5ⁿ 衰减、根因卡为什么宁可写「以深挖输出为准」、提案为什么默认 off——每个决定都核对到真实函数。</p>
+    </div>
+    <div class="hero-meta">
+      <span class="pill"><b>24</b> 个后端模块</span>
+      <span class="pill"><b>6799</b> 行 · 只读解剖</span>
+      <span class="pill"><b>5</b> 类拨测 + 0 依赖 DNS</span>
+      <span class="pill"><b>5</b> 条白名单正则</span>
+    </div>
+  </div>
+  <figure class="art">
+    <div class="screen">
+      <div class="screen-img">
+        <img src="assets/art/hero.webp" alt="单眼折纸鸟运维员穿反光背心，举着值班手电站在机房机架列前，机架上一排排 LED 指示灯绿橙相间" width="1152" height="832"/>
+      </div>
+      <div class="tc-bar"><span>RACK 12</span><span class="tc">RULES · PROBES · PROPOSALS</span></div>
+    </div>
+    <figcaption><span><b>FIG. 00</b> 巡检员只带一支手电：先看事实，再谈叙事</span><span>INK &amp; GOUACHE / 2026</span></figcaption>
+  </figure>
+</section>
+
+<section class="stats" aria-label="关键数字">
+  <div class="wrap stats-inner">
+    <div class="stat"><b>0<span>依赖</span></b><small>DNS 栈纯 stdlib 手写：RFC1035 压缩指针 + DoH 复用同一套线格式</small></div>
+    <div class="stat"><b>3/2<span>次</span></b><small>拨测双阈值防抖：连续 3 败才下线，连续 2 成才恢复（Gatus 式）</small></div>
+    <div class="stat"><b>0.5ⁿ<span>衰减</span></b><small>健康分对同类告警指数衰减——堆积不再线性砸穿分数</small></div>
+    <div class="stat"><b>off<span>默认</span></b><small>提案执行开关：批准只记录决策，执行是之后另一个显式动作</small></div>
+  </div>
+</section>
+
+<div class="wrap opening">
+  <div class="prose">
+    <div class="jd-card">
+      <p class="jd-tag">DESIGN NOTE · rules.py 模块注释第一行（原文）</p>
+      <p class="jd-text">「Deterministic rule engine: runs before any LLM. <strong>AI narrates and deep-dives, rules decide facts.</strong>」——确定性规则引擎，先于任何大模型运行；AI 负责叙事与深挖，<em>事实由规则决定</em>。</p>
+      <p class="jd-note" style="margin-top:10px">这行注释是整台 Agent 的宪法，也是它和「把大模型接上监控数据」这类产品的分水岭：分数、告警、根因卡的骨架全部出自确定性代码，AI 的每句话都被钉在「附加视角」的位置上。本篇就沿着这条宪法往下拆。</p>
+    </div>
+    <p class="lead">巡检是运维里最老的一门手艺，也是最容易被「接入大模型」冲昏头的一门。这台 Agent 的做法近乎固执：先写死一套确定性规则——磁盘 85% 警告、95% 严重、恢复必须回落到 80% 以下；再写一台不依赖任何库的 DNS 栈和一段直插 iphlpapi 的 ICMP；健康分对同类告警按 0.5ⁿ 衰减，免得十条「磁盘 86%」把分数砸穿；根因卡的结论永远来自规则事实，AI 叙事挂了就挂着，<em>诊断照常出卡</em>。到最危险的修复环节，它立了全篇最硬的一条铁律：批准只是记录决策，执行是批准之后另一个显式动作——默认关闭，逐段白名单，一切留痕。</p>
+    <p class="scope">标本 · hermes-watch（本机自研，backend/app 24 模块 6799 行，只读解剖未运行）<br/>本文引文核对到真实函数：rules.py / probes.py / analysis.py / executor.py / collector.py<br/>四枚小样全部确定性：判定规则照抄源码，参数摊在明面上。</p>
+    <div class="toc-head"><span>CONTENTS · 七段解剖</span><span>RULES → PROBES → DEEP-DIVE → PROPOSALS</span></div>
+    <nav class="toc">
+      <a href="#ch1"><i>01</i><span>规则决定事实，AI 负责说话<small>rules.py 先于一切大模型；findings 与叙事的分工</small></span></a>
+      <a href="#ch2"><i>02</i><span>告警也会发抖<small>Netdata CLEAR 滞后阈值治 flapping，0.5ⁿ 治分数砸穿</small></span></a>
+      <a href="#ch3"><i>03</i><span>五种拨测与一台手写的 DNS 栈<small>纯 stdlib、IcmpSendEcho 的 64 位坑、健康分隔离</small></span></a>
+      <a href="#ch4"><i>04</i><span>深挖：证据是跑出来的<small>DEEP_DIVE 只读探针、根因陈述不猜未验证的成因</small></span></a>
+      <a href="#ch5"><i>05</i><span>根因卡与优雅降级<small>card 六字段、AI 三态、匿名化与 RFC 5737</small></span></a>
+      <a href="#ch6"><i>06</i><span>提案：批准不是执行<small>五条白名单正则、逐段校验、propose_exec 默认 off</small></span></a>
+      <a href="#ch7"><i>07</i><span>数据不出本机<small>采集只读、ai_outbound 门控、映射表绝不落库</small></span></a>
+    </nav>
+  </div>
+</div>
+
+<main>
+<section class="chapter" id="ch1">
+  <div class="ch-head">
+    <div class="ch-num"><b>01</b>CHAPTER<br/>00:00</div>
+    <div class="ch-title">
+      <h2>规则决定事实，AI 负责说话</h2>
+      <p>整个系统最重要的一次分工：确定性引擎先跑完所有判断，大模型才被允许开口——而且只有叙事权</p>
+    </div>
+  </div>
+  <div class="ch-body">
+    <p class="lede">市面上「AI 监控」的典型做法，是把指标喂给大模型，让它判断「服务器是否健康」。这台 Agent 的规则引擎模块在第一行注释里就把这条路堵死了（rules.py 原文）：</p>
+    <div class="pull">Deterministic rule engine: runs before any LLM.<br/><b>AI narrates and deep-dives, rules decide facts.</b><br/>确定性规则引擎，先于任何大模型运行。AI 负责叙事与深挖，事实由规则决定。</div>
+    <p>这不是对 AI 的不信任表演，而是一次严格的<strong>职责切分</strong>。把整条巡检流水线摊开看，每一环的「决定权」归属清清楚楚：</p>
+    <div class="fig"><div class="frame">
+      <p class="layers-cap">FIG. 01 · 巡检流水线与决定权归属——每一环都标着「谁说了算」</p>
+      <div class="layers">
+        <div class="layer"><span class="layer-mark lm-1"></span><i>S1</i><b>采集<small>collector.py</small></b><p>SSH 跑只读命令解析指标（df/ps/docker/证书/登录），或 mock 双轨。<strong>决定权：命令与解析器。</strong></p></div>
+        <div class="layer"><span class="layer-mark lm-2"></span><i>S2</i><b>规则<small>rules.py</small></b><p>阈值比对产出 findings + 健康分。<strong>决定权：规则引擎——全系统唯一的事实来源。</strong></p></div>
+        <div class="layer"><span class="layer-mark lm-3"></span><i>S3</i><b>拨测<small>probes.py</small></b><p>五类主动拨测独立成域，失败只落事件不进 findings。<strong>决定权：状态机。</strong></p></div>
+        <div class="layer"><span class="layer-mark lm-4"></span><i>S4</i><b>深挖<small>analysis.py</small></b><p>真实执行只读探针命令拿证据，组装根因卡。<strong>决定权：证据（命令输出）。</strong></p></div>
+        <div class="layer"><span class="layer-mark lm-5"></span><i>S5</i><b>叙事<small>ai_narration</small></b><p>AI 把证据讲成人话，挂在卡片侧栏。<strong>决定权：无——附加视角，永不覆盖 root_cause。</strong></p></div>
+        <div class="layer"><span class="layer-mark lm-6"></span><i>S6</i><b>提案<small>executor.py</small></b><p>白名单命令，批准与执行分离。<strong>决定权：人 + 白名单正则。</strong></p></div>
+      </div>
+    </div><figcaption><span><b>FIG. 01</b> 六段流水线，六种决定权</span><span>标本 · backend/app</span></figcaption></div>
+
+    
+    <div class="fig"><div class="frame">
+      <img src="assets/art/ch1.webp" alt="单眼折纸鸟法官坐在审判席后，法槌按在写满公式的石板上" width="1152" height="832" loading="lazy" style="width:100%;border:1px solid var(--line)"/>
+    </div><figcaption><span><b>FIG. 02</b> 规则先于言说：法槌落下之前，谁都别开口</span><span>INK &amp; GOUACHE / 2026</span></figcaption></div>
+
+<h3>findings：事实的最小单元</h3>
+    <p>规则引擎的产出物叫 finding——一条结构化事实：<code>{type, severity, title, detail, evidence}</code>。磁盘、内存、CPU、load、IO 写入、温度、swap、failed 服务、可疑登录、容器退出、证书临期，每类各有判据。看真实代码（rules.py · <code>evaluate()</code>，有删节）：</p>
+    <div class="code"><div class="code-bar"><span>rules.py · evaluate() · 阈值判定（节选）</span><b>事实长这样</b></div>
+<pre><span class="k">if</span> disk >= T[<span class="s">"disk_crit"</span>] <span class="k">or</span> (<span class="s">"disk"</span> <span class="k">in</span> active <span class="k">and</span> disk >= C[<span class="s">"disk"</span>]):
+    <span class="f">add</span>(<span class="s">"disk"</span>, <span class="s">"crit"</span> <span class="k">if</span> disk >= T[<span class="s">"disk_crit"</span>] <span class="k">else</span> <span class="s">"warn"</span>,
+        <span class="s">f"磁盘使用率 {disk:.0f}%"</span>, <span class="s">f"Disk usage {disk:.0f}%"</span>,
+        <span class="s">"磁盘即将写满，有写入失败风险"</span> <span class="k">if</span> disk >= T[<span class="s">"disk_crit"</span>]
+        <span class="k">else</span> <span class="s">f"超过 {T['disk_warn']:.0f}% 警戒线"</span>, ...,
+        {<span class="s">"disk"</span>: disk})          <span class="c"># evidence 随行：数字进事实，不进叙事</span></pre></div>
+    <p>三处细节值得停。其一，<strong>evidence 随行</strong>：每条 finding 自带结构化证据（<code>{"disk": 91.3}</code>），后面深挖、根因、提案全从这里取数——事实和它的依据从不分离。其二，<strong>双语在生成处落定</strong>：「中文是存库事实源，EN 面板在生成处即落英文文案」——而不是展示层现翻。其三，那个 <code>C["disk"]</code>：告警已打开时，磁盘要回落到比告警线更低的恢复线才算解除——这是第二章的主角，先按下。</p>
+
+    <h3>AI 的三重门</h3>
+    <p>AI 在这台机器里要过三道门才说得上话：<strong>第一道，ai_outbound 开关</strong>——<code>_llm_enabled()</code> 查设置，默认关着，LLM 根本不出网；<strong>第二道，匿名化</strong>——主机名和 IP 先换成 RFC 5737 文档段占位符（第五章细拆）；<strong>第三道，位置</strong>——就算三样齐了，AI 的输出也只是卡片上的 <code>ai_narration</code> 字段，和 <code>root_cause</code> 并排放着，但 code 里的注释把它钉死了：</p>
+    <div class="pull">规则引擎结论永远为准；AI 叙事仅作为附加视角单列，<b>绝不覆盖 root_cause</b>。</div>
+    <p>第五行那格「决定权：无」就是这个意思。不是 AI 不会说话，是<em>说话这件事被安排在事实之后</em>。</p>
+    <div class="note"><b>系列对照：</b>VOL.06《给 Agent 打分》立过「判分器也要被评测」，VOL.11 立过「提示词是意见，工具是法律」。这一篇再进一格：<strong>叙事和事实是两种权限</strong>——让最会说话的组件只拿叙事权限，是架构级的防幻觉。</div>
+    <p>分工定了，接下来看规则引擎自己怎么站得住：阈值会抖、分数会砸穿，第二章讲两剂解药。</p>
+  </div>
+</section>
+
+<section class="chapter" id="ch2">
+  <div class="ch-head">
+    <div class="ch-num"><b>02</b>CHAPTER<br/>00:01</div>
+    <div class="ch-title">
+      <h2>告警也会发抖</h2>
+      <p>磁盘在 85% 警戒线上反复横跳，告警就跟着一惊一乍——两剂老药：滞后阈值与指数衰减</p>
+    </div>
+  </div>
+  <div class="ch-body">
+    <p class="lede">监控系统的第一号慢性病叫 <strong>flapping</strong>：指标贴着告警线抖动，告警开了关、关了开，通知轰炸比故障本身烦人。这台 Agent 的解药是从 Netdata 学来的老办法，写死在代码注释里（rules.py · L20）：</p>
+    <div class="pull">滞后恢复阈值（Netdata CLEAR 模式）：触发用 warn/crit 阈值，<b>恢复要求指标回落到更低的 clear 阈值之下</b>——防止指标在告警线附近抖动导致告警反复打翻。</div>
+    <h3>进出分开两条线</h3>
+    <p>以磁盘为例：85% 触发警告，但解除不是「回到 84.9%」，而是要<strong>回落到 80% 以下</strong>。中间那 5 个点是一条缓冲带，指标在带内怎么抖都不翻转。四类主指标各有一条 clear 线（disk 80 / memory 80 / cpu 75 / load 6.0），且代码里有个贴心的联动（rules.py · <code>clear_thresholds()</code>）：</p>
+    <div class="code"><div class="code-bar"><span>rules.py · clear_thresholds() · L62</span><b>恢复线跟随告警线</b></div>
+<pre><span class="k">def</span> <span class="f">clear_thresholds</span>() -> dict:
+    <span class="s">"""恢复阈值 = min(用户同主阈值 - 5, 内置 clear 值)，用户调高告警线时恢复线跟随。"""</span>
+    t = <span class="f">dict</span>(CLEAR_THRESHOLDS)
+    T = <span class="f">thresholds</span>()
+    <span class="k">for</span> k_main, k_clear <span class="k">in</span> ((<span class="s">"disk_warn"</span>, <span class="s">"disk"</span>), (<span class="s">"mem_warn"</span>, <span class="s">"memory"</span>),
+                            (<span class="s">"cpu_warn"</span>, <span class="s">"cpu"</span>), (<span class="s">"load_warn"</span>, <span class="s">"load"</span>)):
+        t[k_clear] = <span class="f">min</span>(t[k_clear], T[k_main] - <span class="n">5</span>)
+    <span class="k">return</span> t</pre></div>
+    <p>把告警线从 85 调到 92，恢复线自动变成 min(80, 87) = 80——<em>用户调告警线时不会无意中把缓冲带调没</em>。一个 min 函数，省掉一类「我调了阈值怎么告警还是乱翻」的支持问题。而 evaluate() 里恢复的判定也据此写成：磁盘告警处于打开状态时，必须 <code>disk &lt; C["disk"]</code> 才放行解除。</p>
+
+    <h3>分数的第二次防抖：0.5ⁿ 衰减</h3>
+    <p>告警翻转让通知遭殃，分数堆积则让健康分遭殃——十条「磁盘 86%」的 warn 按线性叠加就是 −80 分，直接砸穿。健康分的公式（rules.py · <code>health_score()</code> 注释）：</p>
+    <div class="pull">健康分 = 100 − Σ(类型权重 × <b>0.5^同类次数</b>)，下限 0。<br/>权重区分发现类型的业务影响（SCORE_WEIGHTS：安全/容量重、性能/温度轻）；同类重复发现指数衰减——<b>同型告警堆积不再无脑线性叠加砸穿分数</b>。</div>
+    <div class="tablewrap"><table>
+      <thead><tr><th>发现类型</th><th>crit / warn 扣分</th><th>业务理由</th><th>第 3 次同类 warn 实扣</th></tr></thead>
+      <tbody>
+        <tr><td><code>login</code> 可疑登录</td><td class="num">30 / 12</td><td>安全事件最重</td><td class="num">3.0</td></tr>
+        <tr><td><code>container</code> 容器退出</td><td class="num">24 / 8</td><td>可用性受损</td><td class="num">2.0</td></tr>
+        <tr><td><code>disk</code> / <code>memory</code></td><td class="num">24 / 8</td><td>容量风险</td><td class="num">2.0</td></tr>
+        <tr><td><code>cert</code> 证书临期</td><td class="num">18 / 8</td><td>有窗口期的事件</td><td class="num">2.0</td></tr>
+        <tr><td><code>cpu</code> / <code>load</code></td><td class="num">10 / 4</td><td>性能噪声类最轻</td><td class="num">1.0</td></tr>
+        <tr><td><code>io</code> / <code>temp</code></td><td class="num">6 / 3</td><td>信号价值最低</td><td class="num">0.75</td></tr>
+      </tbody>
+    </table></div>
+    <p>注意「第 3 次实扣」那列：8 × 0.25 = 2.0——同一条告警刷屏十次，边际惩罚趋近于零。<strong>分数反映的是「这台机器有几个问题」，不是「告警日志有多长」。</strong></p>
+
+    <div class="demo" id="d2">
+      <div class="demo-head"><span class="demo-tag">DEMO 02 · 健康分秤</span><span class="demo-title">0.5ⁿ vs 线性叠加<span class="hint">加发现，看两条曲线分岔</span></span></div>
+      <div class="demo-body">
+        <div class="hs-wrap">
+          <div class="hs-score">
+            <div class="hs-big" id="d2-big">100</div>
+            <div class="hs-status" id="d2-status">OK · HEALTHY</div>
+            <div class="hs-add" id="d2-add"></div>
+            <div class="hs-list" id="d2-list"></div>
+            <button class="ghost" id="d2-reset" style="margin-top:9px">清空</button>
+          </div>
+          <div>
+            <div class="hs-chart"><svg class="hs-svg" id="d2-svg" viewBox="0 0 520 170" preserveAspectRatio="none"></svg>
+              <div class="hs-legend"><span class="a">线性叠加（对照）</span><span class="b">0.5ⁿ 衰减（本标本）</span></div>
+            </div>
+            <div class="hs-switch"><label class="switch"><input type="checkbox" id="d2-lin"/><span>显示线性叠加对照</span></label></div>
+            <div class="hs-note" id="d2-note"></div>
+          </div>
+        </div>
+      </div>
+      <div class="demo-foot">公式与权重照抄 <b>health_score()</b> 与 <b>SCORE_WEIGHTS</b>；status_of：≥90 ok / ≥70 warn / 其余 crit。线性叠加为对照模型（每次全扣），非标本行为。</div>
+    </div>
+
+    <p>滞后治「翻转抖动」，衰减治「分数堆积」——两剂药都不新鲜，新鲜的是它们被当成一等公民写进注释、算给读者看。监控系统的可信度往往就藏在这种不起眼的减法里。</p>
+  </div>
+</section>
+
+<section class="chapter" id="ch3">
+  <div class="ch-head">
+    <div class="ch-num"><b>03</b>CHAPTER<br/>00:02</div>
+    <div class="ch-title">
+      <h2>五种拨测与一台手写的 DNS 栈</h2>
+      <p>URL / TCP / DNS / DoH / ICMP 五路主动出击，而最惊人的决定是：不引 dnspython，RFC1035 自己写</p>
+    </div>
+  </div>
+  <div class="ch-body">
+    <p class="lede">主机指标巡检回答「这台机器累不累」，回答不了「它对外的服务还活着吗」。补这个维度缺口的是拨测模块（probes.py 文件头，原文）：</p>
+    <div class="pull">对标 Uptime Kuma 拨测 / Gatus 状态机，补「只管主机不管服务」的维度缺口。<br/>URL（GET）· TCP（host:port）· DNS（解析器 + 期望应答）· <b>DoH（RFC 8484，Kuma 没有的差异化项）</b>· ICMP（均零特权零依赖）。</div>
+    <h3>一台不引库的 DNS 栈</h3>
+    <p>五类拨测里最显手艺的是 DNS。市面做法是 <code>pip install dnspython</code>，这台 Agent 的选择是把协议自己写一遍——查询构造、压缩指针解析、RDATA 展开共百来行（probes.py · L96–229）：</p>
+    <div class="code"><div class="code-bar"><span>probes.py · _parse_name() · RFC1035 压缩指针（节选）</span><b>自己读报文</b></div>
+<pre><span class="k">def</span> <span class="f">_parse_name</span>(buf: bytes, off: int) -> tuple[str, int]:
+    <span class="s">"""读 DNS 名称（RFC1035 压缩指针），返回 (name, 消耗结束偏移)。"""</span>
+    labels = []
+    pos, end, jumped = off, off, <span class="k">False</span>
+    <span class="k">while</span> <span class="k">True</span>:
+        ln = buf[pos] <span class="k">if</span> pos &lt; <span class="f">len</span>(buf) <span class="k">else</span> <span class="n">0</span>
+        <span class="k">if</span> ln == <span class="n">0</span>:
+            <span class="k">if</span> <span class="k">not</span> jumped: end = pos + <span class="n">1</span>
+            <span class="k">break</span>
+        <span class="k">if</span> ln &amp; <span class="n">0xC0</span>:  <span class="c"># 压缩指针</span>
+            <span class="k">if</span> <span class="k">not</span> jumped:
+                end = pos + <span class="n">2</span>; jumped = <span class="k">True</span>
+            pos = ((ln &amp; <span class="n">0x3F</span>) &lt;&lt; <span class="n">8</span>) | buf[pos + <span class="n">1</span>]
+            <span class="k">continue</span>
+        labels.append(buf[pos + <span class="n">1</span>:pos + <span class="n">1</span> + ln].decode(<span class="s">"ascii"</span>, <span class="s">"replace"</span>))
+        pos += <span class="n">1</span> + ln
+    <span class="k">return</span> <span class="s">"."</span>.join(labels), end</pre></div>
+    <p>为什么不引库？文件头没解释，但收益写在结构里：<strong>DoH 直接复用同一套线格式</strong>——<code>doh_lookup()</code> 把同一段 <code>_build_query()</code> 的报文 POST 到 <code>https://1.1.1.1/dns-query</code>（RFC 8484），解析走同一个 <code>_parse_response()</code>。一个协议，两种传输，零新依赖。还能离线测试：「纯函数，离线可测」——构造几段字节流就能单测解析器，不需要网络。</p>
+    <h3>ICMP 的两个平台，两种市井智慧</h3>
+    <p>ICMP ping 在两个操作系统上是两套完全不同的生存策略。Windows 直插 iphlpapi 的 <code>IcmpSendEcho</code>——非特权进程就能发 echo；Linux 走 <code>SOCK_DGRAM</code> ICMP——内核替你匹配应答，同样不用 root。而那段 ctypes 代码里埋着一行用血换来的注释：</p>
+    <div class="pull">64 位 Python 必须显式定参（默认按 32 位 int 传参，<b>指针会被截断 → access violation</b>）。</div>
+    <p>四百字节的 argtypes 声明，换来的是「少一次深夜段错误」。这就是手写协议栈的隐性账单：<em>省下的依赖，都要用理解力偿还</em>——但理解力一旦付过，就变成了自己的资产。</p>
+    <h3>状态机：3 败才下线，2 成才恢复</h3>
+    <p>拨测结果的定性不靠单次请求——那会被一次网络抖动骗到。Gatus 式双阈值防抖（probes.py · <code>evaluate()</code>）：</p>
+    <ul>
+      <li><strong>连续 fail_threshold（默认 3）次失败 → down</strong>；失败计数与是否翻转无关，成功即清零。</li>
+      <li><strong>down 中连续 success_threshold（默认 2）次成功 → up</strong>——恢复比下线更难，防止刚翻就抖回去。</li>
+      <li>push 型目标反向：不轮询，等上报；容忍窗口（默认 600s）过时未上报直接判死，「grace 即防抖」。</li>
+    </ul>
+    <div class="demo" id="d1">
+      <div class="demo-head"><span class="demo-tag">DEMO 01 · 拨测状态机</span><span class="demo-title">3 败下线，2 成恢复<span class="hint">逐次点击，看防抖怎么吃掉抖动</span></span></div>
+      <div class="demo-body">
+        <div class="pm-wrap">
+          <div>
+            <div class="pm-stage">
+              <div class="pm-state" id="d1-state"></div>
+              <div class="pm-lights" id="d1-lights"></div>
+              <div class="pm-counter-lbl" id="d1-lbl"></div>
+              <div class="pm-log" id="d1-log"></div>
+            </div>
+            <div class="pm-btnrow" style="margin-top:12px">
+              <button class="run" id="d1-fail">这次拨测失败</button>
+              <button class="ghost" id="d1-ok">这次拨测成功</button>
+              <button class="ghost" id="d1-reset">重置</button>
+            </div>
+          </div>
+          <div class="pm-side">
+            <h5>状态台账</h5>
+            <div class="pm-kv" id="d1-kv"></div>
+            <div class="hintline">fail_threshold = <b>3</b> · success_threshold = <b>2</b><br/>周期 30s · 并发上限 8 · 15s 步进</div>
+          </div>
+        </div>
+      </div>
+      <div class="demo-foot">照抄 <b>evaluate()</b> 的计数与翻转逻辑：失败累计 fail_streak（与翻转无关）、成功累计 succ_streak；up 中 3 连败 → down，down 中 2 连胜 → up。通知翻转才发（down 带原因 / up 带持续时长）。</div>
+    </div>
+
+    <h3>域隔离：拨测不许污染健康分</h3>
+    <p>最后是这个模块最清醒的一个决定，写在文件头（原文）：</p>
+    <div class="pull">设计取舍：拨测失败不进 findings（那是主机指标域），只落 events + probe_log；面板独立「拨测」页展示，<b>Fleet 健康分不被拨测污染</b>。</div>
+    <p>想想反例：把拨测失败也按 warn 塞进健康分，那么一次 DNS 解析器抽风会把「机器本身很健康」的事实搅浑——分数从此说不清自己是什么。域隔离让主机域和服务域各自记账、各自告警，<em>分数的语义于是稳定</em>。这也是对 ch2 衰减公式的补充：衰减管同域堆积，隔离管跨域混淆。</p>
+    <div class="note"><b>调度细节：</b>拨测有独立的 15s 步进循环，周期默认 30s，与 60s 主机巡检解耦；<code>DIAL_SEMA = Semaphore(8)</code> 防一串 10s 超时目标拖住整轮；<code>gather(return_exceptions=True)</code> 保证单目标异常不拖垮同轮其他目标——并发纪律与 VOL.10 的「单模型重试不惊动全链」同源。</div>
+  </div>
+</section>
+
+<section class="chapter" id="ch4">
+  <div class="ch-head">
+    <div class="ch-num"><b>04</b>CHAPTER<br/>00:03</div>
+    <div class="ch-title">
+      <h2>深挖：证据是跑出来的</h2>
+      <p>根因卡的每一个字都要有出处——「以深挖输出为准」这句话，是这台 Agent 对幻觉最硬的防御</p>
+    </div>
+  </div>
+  <div class="ch-body">
+    <p class="lede">规则引擎报出「磁盘 91%」，然后呢？大多数「智能运维」在这里让大模型自由发挥，于是根因分析里长出「可能是日志膨胀，也可能是容器写入风暴」这类漂亮的猜谜。这台 Agent 的 <code>analyze_finding()</code> 走了另一条路：<strong>先跑命令，后写卡片</strong>。</p>
+    <h3>DEEP_DIVE：只读探针命令表</h3>
+    <p>analysis.py 里有一张 DEEP_DIVE 表：每类 finding 对应一条真实执行的只读命令（<code>du -xh /var --max-depth=2 | sort -rh | head -5</code> 之类），命令经 SSH 在目标机上真跑，输出截 800 字进卡片。代码里那个 replace-not-format 的细节最见功力（analysis.py · L637 注释原文）：</p>
+    <div class="pull">replace 而非 format：<b>docker inspect 的 {{.State.*}} 花括号不能被 str.format 吃掉。</b></div>
+    <p>一行注释，一次一定会踩的坑——Go 模板的花括号和 Python 的 format 占位符撞车。深挖命令的输出按步骤落进卡片的 <code>steps</code> 数组，每步带 <code>{label, command, output}</code>——<em>证据的结构化程度和结论一样高</em>。</p>
+    
+    <div class="fig"><div class="frame">
+      <img src="assets/art/ch4.webp" alt="单眼折纸鸟工程师用放大镜读一卷打印着数值的纸带" width="1152" height="832" loading="lazy" style="width:100%;border:1px solid var(--line)"/>
+    </div><figcaption><span><b>FIG. 03</b> 深挖：每一条结论都要能指着一行输出</span><span>INK &amp; GOUACHE / 2026</span></figcaption></div>
+
+<h3>根因陈述的克制</h3>
+    <p>卡片上的 root_cause 从哪来？来自 <code>_rule_root_cause()</code>——函数注释先立规矩（原文）：</p>
+    <div class="pull">真实主机的根因陈述 = <b>规则引擎的事实，不猜测未验证的成因。</b></div>
+    <p>所以磁盘类根因写的是「磁盘使用率 91% 越过阈值，<em>主要占用来源以深挖输出为准</em>」——它明确告诉你哪些是事实（越限）、哪些还没验证（占用来源）、去哪里验证（深挖输出）。可疑登录类则精确到证据字段：「来源 IP {ip} 以用户 {user} 登录成功，不在常见内网段」。对比大模型版本的根因——「可能由异常进程导致，建议关注」——差别不在文采，在<em>每个字是否可回查</em>。</p>
+    <h3>confidence 为什么只有两档</h3>
+    <p>根因卡的置信度标注只有高/中两档，判定规则一行（analysis.py · L656）：</p>
+    <div class="code"><div class="code-bar"><span>analysis.py · L656（原样）</span><b>置信度 = 有没有跑出证据</b></div>
+<pre>confidence = i18n.t(<span class="s">"高"</span>, <span class="s">"High"</span>) <span class="k">if</span> steps <span class="k">else</span> i18n.t(<span class="s">"中"</span>, <span class="s">"Medium"</span>)</pre></div>
+    <p>跑出了深挖步骤就是「高」，只有规则事实就是「中」——没有第三档「低」，因为不存在「没证据也敢写根因」的情况。这张卡的骨架长这样：</p>
+    <div class="code"><div class="code-bar"><span>analysis.py · analyze_finding() · L690–699（原样结构）</span><b>根因卡六字段</b></div>
+<pre>card = {
+    <span class="s">"root_cause"</span>:   root_cause,      <span class="c"># 规则事实，不猜</span>
+    <span class="s">"chain"</span>:        chain,           <span class="c"># 因果链（发现类型 → 预定义传导路径）</span>
+    <span class="s">"confidence"</span>:   confidence,      <span class="c"># 有深挖=高 / 无=中</span>
+    <span class="s">"steps"</span>:        steps,           <span class="c"># 只读探针执行轨迹 {label, command, output}</span>
+    <span class="s">"proposal_id"</span>:  proposal_id,     <span class="c"># 修复提案（下一章：批准≠执行）</span>
+    <span class="s">"ai_narration"</span>: ai_narration,    <span class="c"># AI 附加视角，永不覆盖 root_cause</span>
+}</pre></div>
+    <p>注意 <code>chain</code>——因果链不是模型现编的，而是按发现类型预定义的传导路径（如 磁盘涨 → journal 堆积 → 写入失败风险）。哪些因果是这台系统「承认」的，全部枚举在表里；表外没有因果。</p>
+
+    <div class="demo" id="d3">
+      <div class="demo-head"><span class="demo-tag">DEMO 03 · 根因卡生成器</span><span class="demo-title">一张卡怎么长出来<span class="hint">选发现类型，切 AI 三态</span></span></div>
+      <div class="demo-body">
+        <div class="rc-wrap">
+          <div class="rc-types" id="d3-types"></div>
+          <div>
+            <div class="rc-card" id="d3-card"></div>
+            <div class="rc-foot" id="d3-foot"></div>
+          </div>
+        </div>
+      </div>
+      <div class="demo-foot">chain / root_cause / confidence 判定与 steps 结构照抄 <b>analyze_finding()</b> 与 <b>_rule_root_cause()</b>；AI 三态演示 <b>ai_narration</b> 的位置——成功也只是附加视角，失败则事件注明「诊断继续，规则结论不受影响」。</div>
+    </div>
+
+    <p>深挖给了证据，规则给了结论。但一套系统真正的性格，要看它<strong>失败的时候怎么办</strong>——下一章专门讲这个。</p>
+  </div>
+</section>
+
+<section class="chapter" id="ch5">
+  <div class="ch-head">
+    <div class="ch-num"><b>05</b>CHAPTER<br/>00:04</div>
+    <div class="ch-title">
+      <h2>根因卡与优雅降级</h2>
+      <p>AI 三态、fallback 文案、匿名化映射——一台系统的可靠性，全写在它失败的路上</p>
+    </div>
+  </div>
+  <div class="ch-body">
+    <p class="lede">根因卡六字段里最谦逊的是 <code>ai_narration</code>。这一章把 AI 在这台机器里的完整生命周期摊开——三态、降级、和它永远碰不到的东西。</p>
+    <h3>AI 的三态：成功、失败、未启用</h3>
+    <p>叙事的入口有一道总闸（analysis.py · <code>_llm_enabled()</code>）：设置键 <code>ai_outbound</code> 非 <code>on</code> 时，LLM 根本不出网——卡片照出，只是没有 ai_narration 字段。<strong>「没有 AI」不是一个错误态，是一个正常态。</strong></p>
+    <p>开关开了，还有失败态。_llm_narrate 抛异常时，代码做的事令人安心（analysis.py · L684–688）：</p>
+    <div class="code"><div class="code-bar"><span>analysis.py · AI 失败路径（原样）</span><b>失败也要有名字</b></div>
+<pre><span class="k">except</span> Exception <span class="k">as</span> e:
+    ai_error = <span class="s">f"{type(e).__name__}: {e}"</span>[:<span class="n">160</span>]
+    db.<span class="f">execute</span>(<span class="s">"INSERT INTO events(...) VALUES(...)"</span>,
+        (<span class="s">"ai_error"</span>,
+         i18n.t(<span class="s">f"AI 叙事失败（诊断继续，规则结论不受影响）: {ai_error}"</span>,
+                <span class="s">f"AI narration failed (diagnosis continues, rule verdicts unaffected)"</span>),
+         <span class="s">"{}"</span>))</pre></div>
+    <p>三件事同时发生：错误截 160 字进 ai_error 字段、事件表落一条<em>说清了后果的</em>记录（不是干巴巴的堆栈）、诊断流程照常走完。<strong>卡片不重试、不阻塞、不因此降级根因</strong>——AI 在这里是个可摘除的器官，摘了人照样活。</p>
+    <p>还有第三层兜底：AI 聊天入口的 <code>_fallback_answer()</code>——未配置 LLM 时，对话面板依然能用本地数据回答「现在哪台机器最不健康」这类问题（fleet_snapshot 直查），回答里明说「AI 未启用」。宁可给一个诚实的本地答案，不给一个转圈。</p>
+    <h3>匿名化：出网前的最后一道闸</h3>
+    <p>ai_outbound 开了、叙事要出网了，文本先过 <code>anonymize()</code>（analysis.py · L230）：</p>
+    <div class="pull">把主机名 / 主机地址 / 任意 IPv4 替换为稳定占位符（同一次调用内映射一致，<b>模型可跨句引用同一实体</b>）。映射表只存在于本次调用的内存里，<b>绝不落库</b>。</div>
+    <p>三个设计点：①占位符落在 <strong>RFC 5737 文档专用段（203.0.113.x）</strong>——这是 IANA 划给文档的网段，永远不会误指真实主机；②「稳定占位符」保证同一次调用里 web-01 永远是同一个假 IP，模型能做跨句推理；③映射表的生命周期 = 一次调用，用完即焚——回读时用 <code>de_anonymize()</code> 换回来，模型到死都不知道真实拓扑。<em>数据不出本机不是一句口号，是一段 40 行的函数。</em></p>
+    <h3>为何这套降级是可信的</h3>
+    <p>把 AI 三态放进 ch1 的决定权表里看：规则（事实）→ 深挖（证据）→ 提案（白名单）三环全部不依赖 AI，AI 只在叙事位。于是失败的爆炸半径被结构性限制住了——它挂它的，卡片照出、分数照算、提案照批。<strong>这不是「AI 失败重试策略」，是「AI 失败不影响任何事」的架构保证。</strong></p>
+    <p>对比一下常见的反面教材：AI 分析是主流程的一环，AI 挂了整个诊断超时，于是人们给 AI 加重试、加缓存、加降级开关——每一步都在给一个本不该居于要害的组件加固。<em>正确的顺序是先把要害挪走，再谈加固。</em></p>
+    <div class="note"><b>与 VOL.10 呼应：</b>总机篇的「宁可明示模拟，不许静默降级」在这里是同一件事的运维版：宁可没有叙事，不许叙事顶替事实。两台机器隔着三个篇章，说的是同一条伦理。</div>
+    <p>诊断卡出完了，最后一步是动手修。而「动手」在这台机器里是被重重围住的一座城——下一章进这道门。</p>
+  </div>
+</section>
+
+<section class="chapter" id="ch6">
+  <div class="ch-head">
+    <div class="ch-num"><b>06</b>CHAPTER<br/>00:05</div>
+    <div class="ch-title">
+      <h2>提案：批准不是执行</h2>
+      <p>Agent 可以递修复方案，但按按钮的必须是另一只手——全篇最硬的一条铁律，长在 executor.py 第一行</p>
+    </div>
+  </div>
+  <div class="ch-body">
+    <p class="lede">诊断卡上挂着一条修复提案，比如「清理 journal 日志」。人点了批准——然后呢？大多数系统的答案是「执行」。这台 Agent 的答案是（executor.py 模块注释，原文）：</p>
+    <div class="pull"><b>铁律不变：批准仅记录决策（decide 接口），执行是批准之后另一个显式动作</b>，且受设置 propose_exec 门控（默认 off）。每个命令逐段过白名单，<b>每次尝试（含被拒/超时）都写 proposal_runs 审计表</b>。</div>
+    <p>拆开是三层独立闸门：<strong>①批准 ≠ 执行</strong>（两个接口，中间隔着人的第二次动作）；<strong>②propose_exec 默认 off</strong>（全站总开关，装好即用时不具备执行能力）；<strong>③白名单</strong>（过了开关还要过正则）。任何一层说 no，命令都到不了目标机。</p>
+    <h3>白名单：五条正则，逐段整体匹配</h3>
+    <p>全部可执行的修复命令只有五条（executor.py · <code>WHITELIST</code>，原样）：</p>
+    <div class="code"><div class="code-bar"><span>executor.py · WHITELIST · L15–21（原样）</span><b>五条，一条不多</b></div>
+<pre>WHITELIST = [
+    (re.<span class="f">compile</span>(<span class="s">r"^journalctl --vacuum-size=\d+[MG]$"</span>),                <span class="s">"低危"</span>, <span class="s">"清理 journal 日志"</span>),
+    (re.<span class="f">compile</span>(<span class="s">r"^find /var/log -name '\*\.gz' -mtime \+\d+ -delete$"</span>), <span class="s">"中危"</span>, <span class="s">"删除过期压缩日志"</span>),
+    (re.<span class="f">compile</span>(<span class="s">r"^systemctl restart [a-z0-9@._-]+$"</span>),                 <span class="s">"中危"</span>, <span class="s">"重启服务"</span>),
+    (re.<span class="f">compile</span>(<span class="s">r"^ufw insert 1 deny \d{1,3}(\.\d{1,3}){3}$"</span>),          <span class="s">"中危"</span>, <span class="s">"防火墙封禁 IP"</span>),
+    (re.<span class="f">compile</span>(<span class="s">r"^passwd [a-z_][a-z0-9_-]{0,30}$"</span>),                   <span class="s">"高危"</span>, <span class="s">"轮换口令"</span>),
+]
+TIMEOUT = <span class="n">20</span>  <span class="c"># 秒</span></pre></div>
+    <p>校验函数 <code>validate()</code> 的关键设计是<strong>按 <code>&amp;&amp;</code> 分段、每段必须整体匹配</strong>——拼一条「清理日志 &amp;&amp; 顺便 rm -rf /」会在第二段被拒，<em>白名单外的任何拼接都进不去</em>。风险等级取各段最高者；拒绝时明说「白名单外命令: …」。正则本身的克制也值得看：systemctl restart 只放行小写服务名字符，<code>passwd</code> 限制用户名形状——五条规则各自带着自己的边界。</p>
+    <p>提案的生成端同样克制。_proposal_for 的注释（原文）：「真实主机只提有安全依据的命令：提案是要被执行的，<strong>命令里的 IP/服务名必须来自这台机器的证据</strong>，而不是演示剧本」。而最动人的一句是最后的兜底：</p>
+    <div class="pull">memory/cpu/load/cert：真实主机上没有可安全白名单执行的一键命令，<b>宁可不给提案</b>。</div>
+    <p>内存高？没有一键修复，就不提。这和市面「AI 一键优化」形成刺眼对比：<em>没有安全解法的场景，正确的输出是沉默，不是发明一个按钮。</em></p>
+
+    <div class="demo" id="d4">
+      <div class="demo-head"><span class="demo-tag">DEMO 04 · 命令安检门</span><span class="demo-title">逐段过闸，一段不中全单拒绝<span class="hint">点病例或输入命令</span></span></div>
+      <div class="demo-body">
+        <div class="gw-wrap">
+          <div class="gw-in">
+            <div class="gw-cases" id="d4-cases"></div>
+            <div class="gw-input"><input type="text" id="d4-cmd" placeholder="输入命令，如 systemctl restart nginx"/><button class="run" id="d4-check">安检</button></div>
+            <div class="gw-verdict" id="d4-verdict"></div>
+            <div class="gw-segs" id="d4-segs"></div>
+            <div class="gw-audit" id="d4-audit"></div>
+          </div>
+          <div class="gw-side">
+            <h5>白名单（5 条 · executor.py 原文）</h5>
+            <div id="d4-rules"></div>
+          </div>
+        </div>
+      </div>
+      <div class="demo-foot">五条正则、分段逻辑、风险取最高、拒绝文案照抄 <b>validate()</b>；提案生成端补一条标本规则：命令里的 IP/服务名必须来自这台机器的证据，宁可不给提案。</div>
+    </div>
+
+    
+    <div class="fig"><div class="frame">
+      <img src="assets/art/ch6.webp" alt="单眼折纸鸟安检员在金属安检门旁，一张命令纸条被闸口拦下" width="1152" height="832" loading="lazy" style="width:100%;border:1px solid var(--line)"/>
+    </div><figcaption><span><b>FIG. 04</b> 安检门：逐段过闸，一段不中全单拒绝</span><span>INK &amp; GOUACHE / 2026</span></figcaption></div>
+
+<h3>审计：连「被拒」都有台账</h3>
+    <p>执行出口的一切结果——成功、失败、超时、被拒——都进 <code>proposal_runs</code> 表（mode / command / risk / status / exit_code / output / duration_ms）。连「执行超过 20s 被终止」的输出都是一句完整的话：「执行超过 20s 被终止（<em>审计已留存；恢复需人工确认</em>）」。mock 主机还设计了「修复生效 → 指标曲线真实回落」（_mock_recover），让演示环境下人能看到修复前后曲线的差别——<em>连教学用的假数据都遵守因果律</em>。</p>
+    <p>批准、白名单、开关、审计——四层叠完，才轮到那只「另一只手」按下去。而这台机器对「动手」的态度，恰好是理解它整个安全模型的钥匙：下一章收束全局。</p>
+  </div>
+</section>
+
+<section class="chapter" id="ch7">
+  <div class="ch-head">
+    <div class="ch-num"><b>07</b>CHAPTER<br/>00:06</div>
+    <div class="ch-title">
+      <h2>数据不出本机</h2>
+      <p>采集只读、AI 出网要开两道闸、面板有登录防护——「全本机」三个字是十几个小决定的合数</p>
+    </div>
+  </div>
+  <div class="ch-body">
+    <p class="lede">README 里那句话——「让一个懂运维的 agent 住进你自己的机器」——听起来像营销。落到代码上，「住进你自己的机器」由一连串具体的小决定构成，每个都能指到行号。</p>
+    <h3>采集端：只读是唯一姿势</h3>
+    <p>collector.py 在目标机上跑的全部是只读探针命令：df 看磁盘、ps 看进程、docker ps 看容器、openssl 看证书、last 看登录。深挖命令同样只读（ch4 的 DEEP_DIVE 表）。<strong>唯一有写能力的路径是提案执行</strong>——而那条路要连过 ch6 的四层闸。SSH 会话本身被 12 秒超时包着（run_cmd 默认 timeout=12），单条命令挂死拖不垮巡检循环。</p>
+    <h3>AI 端：两道闸一道焚化炉</h3>
+    <p>ch5 拆过：ai_outbound 总闸默认关；开了之后文本先过 anonymize()，主机名/IP 全部换成 RFC 5737 占位符，映射表用完即焚。值得补的是它的孪生设计——<code>build_fleet_context()</code>：给 AI 的舰队上下文文本同样走匿名化管线，同一个映射表贯穿整个调用。<em>模型看到的是一个假名舰队，而它对假名的所有推理都能被 de_anonymize 原样搬回真实拓扑。</em>隐私保护与可用性在这里没有互斥。</p>
+    
+    <div class="fig"><div class="frame">
+      <img src="assets/art/ch7.webp" alt="单眼折纸鸟值班员趴在值守室桌上打盹，绿灯与值班日志相伴" width="1152" height="832" loading="lazy" style="width:100%;border:1px solid var(--line)"/>
+    </div><figcaption><span><b>FIG. 05</b> 值守室：能安心打盹，因为每道闸都落了锁</span><span>INK &amp; GOUACHE / 2026</span></figcaption></div>
+
+<h3>面板端：guard.py 的三行</h3>
+    <p>面板自己的防护浓缩在一个 34 行的模块里：<code>allow(ip)</code> 判断来源、<code>audit(ip, path, code)</code> 记审计、<code>recent()</code> 读最近记录。认证、频控、审计各自独立，没有一处「为了演示关掉安全」的开关。</p>
+    <h3>这台机器的性格清单</h3>
+    <p>把七章合上，这台巡检 Agent 的性格可以列成一张单子——每一条都对应一处可核对的代码：</p>
+    <div class="rules">
+      <div class="rule"><b>PATROL 01 · 事实与叙事分权</b><p>规则引擎先于 LLM 运行；根因卡结论永远来自规则事实；AI 叙事失败时事件文案明说「诊断继续，规则结论不受影响」。架构上防幻觉，比提示词里求它别编更可靠。</p></div>
+      <div class="rule"><b>PATROL 02 · 老办法先于新名词</b><p>Netdata 的 CLEAR 滞后阈值、Gatus 的双阈值防抖、0.5ⁿ 衰减——这些都不是新发明，但被认真写成一等公民：注释里讲清楚为什么，公式摊开算给读者看。监控系统的可信度是减法堆出来的。</p></div>
+      <div class="rule"><b>PATROL 03 · 动手是另一件事</b><p>批准只是记录；执行有独立开关（默认 off）；五条正则白名单逐段整体匹配；没有安全解法就宁可不给提案；连被拒都进审计表。修复链路的每一步都比上一步难，方向永远朝向人。</p></div>
+    </div>
+    <p>至此，造物手记的 Agent 组织学补上了最后一块：VOL.10 让 Agent 学会挑模型，VOL.11 让 Agent 学会指挥 Agent，这一篇让 Agent 学会<strong>独自值守</strong>——独自值守的全部要领，不是多聪明，而是在每个可以自作主张的岔路口，都提前修好一道闸。</p>
+    <div class="pull">巡检 Agent 的最高美德不是发现得快，<b>而是它自作主张的能力边界，与它值班室的墙一样清楚。</b></div>
+  </div>
+</section>
+
+<div class="wrap epilogue" id="closing">
+  <h2>结语：值守是一种克制的艺术</h2>
+  <p>拆完这台巡检 Agent，最想留下的不是某个机制，而是一种口味：它对「智能」的接入极其节制——AI 三道门、叙事不越位、提案默认 off、五条白名单；同时对「笨功夫」极其大方——手写 DNS 栈、直插 iphlpapi、clear 阈值联动、0.5ⁿ 衰减。智能监控产品的分水岭或许就在这里：<strong>把 AI 放进决定权表的时候，你给它的是叙事权还是裁决权？</strong></p>
+  <div class="rules">
+    <div class="rule"><b>RULE 01 · 先定决定权表，再谈接 AI</b><p>把系统的每个环节列出来，标上「谁说了算」：采集、规则、拨测、深挖、叙事、执行——六个环节六个答案，AI 只在叙事位。先有这张表，AI 才是能力；没有这张表，AI 就是风险。</p></div>
+    <div class="rule"><b>RULE 02 · 监控的手感在减法</b><p>滞后阈值减掉 flapping，指数衰减减掉分数砸穿，域隔离减掉跨域混淆，翻转才发减掉通知轰炸。每一刀都让信号更干净一点——告警的可信度是被减出来的。</p></div>
+    <div class="rule"><b>RULE 03 · 失败路径要写出结果</b><p>「AI 叙事失败（诊断继续，规则结论不受影响）」「执行超过 20s 被终止（审计已留存；恢复需人工确认）」——这两条文案能当范本：说清发生了什么、影响是什么、下一步是什么。系统崩溃的样式，就是它的品格证明。</p></div>
+  </div>
+  <div class="limits"><b>这篇没解决的：</b>多机横向扩展（单机 SQLite + 目录锁，Fleet 规模有限）；告警规则的自适应学习（阈值全部人工配置，无异常检测模型）；拨测的目标管理体验（对标 Kuma 仍有差距）；以及 Windows 之外的平台验收（IcmpSendEcho 分支只在本机验过）。</div>
+  <div class="links">
+    <a href="https://github.com/StarrySea1412/hermes-watch" target="_blank" rel="noopener">hermes-watch（本文解剖标本）</a>
+    <a href="https://starrysea1412.github.io/agent-orchestrator/" target="_blank" rel="noopener">上期 · VOL.11 当 Agent 指挥 Agent</a>
+    <a href="https://starrysea1412.github.io/agent-switchboard/" target="_blank" rel="noopener">VOL.10 给 Agent 配一台总机</a>
+    <a href="https://starrysea1412.github.io/agent-eval/" target="_blank" rel="noopener">VOL.06 给 Agent 打分</a>
+  </div>
+</div>
+
+<footer class="wrap site-foot">
+  <div>
+    <div>造物手记 VOL.12 · 住进机房的 Agent</div>
+    <div style="margin-top:5px">RACK ELEVATION / 2026.11 / 单文件 · 零依赖 · 确定性小样</div>
+  </div>
+  <div class="foot-note">标本 hermes-watch 为本机自研项目，backend/app 24 模块 6799 行；本文引文核对到 rules.py / probes.py / analysis.py / executor.py / collector.py 真实函数与注释，为可读性有删节与中译调整，只读解剖未运行其巡检循环。四枚小样为确定性模型：判定规则照抄源码，参数摊在明面上。字体为 LXGW 文楷（OFL 许可，见 assets/fonts/OFL.txt）。插图由 GPT 系图像模型生成。</div>
+</footer>
+
+</main>
+
+<script>
+/* 四枚确定性小样 + 阅读进度条（VOL.12 · 零依赖，种子化随机，全部可复现）。 */
+(() => {
+  "use strict";
+  const $ = (s, r = document) => r.querySelector(s);
+  const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
+  const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  let seed = 20261105;
+  const srand = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+
+  const prog = $("#progress");
+  if (prog) {
+    const paint = () => {
+      const h = document.documentElement;
+      const max = h.scrollHeight - h.clientHeight;
+      prog.style.transform = "scaleX(" + (max > 0 ? h.scrollTop / max : 0) + ")";
+    };
+    addEventListener("scroll", paint, { passive: true });
+    addEventListener("resize", paint, { passive: true });
+    paint();
+  }
+
+
+  /* ══ DEMO 01 · 拨测状态机（probes.py evaluate：3 败下线 / 2 成恢复）══ */
+  (() => {
+    const st = $("#d1-state");
+    if (!st) return;
+    const S = { up: true, fail: 0, succ: 0, lastFlip: 0, t: 0, log: [] };
+    const FAIL_TH = 3, SUCC_TH = 2;
+    function log(txt, cls) { S.log.push({ txt, cls }); }
+    function render() {
+      st.className = "pm-state " + (S.up ? "up" : "down");
+      st.innerHTML = (S.up ? "UP" : "DOWN") + ' <span class="zh">' + (S.up ? "在线" : "已下线") + "</span>";
+      const lights = [];
+      for (let i = 0; i < 3; i++) lights.push('<div class="pm-light' + (i < S.fail ? " f" : "") + '"></div>');
+      for (let i = 0; i < 2; i++) lights.push('<div class="pm-light' + (i < S.succ ? " s" : "") + '"></div>');
+      $("#d1-lights").innerHTML = lights.join("");
+      $("#d1-lbl").innerHTML = "fail_streak <b>" + S.fail + "</b>/3 · succ_streak <b>" + S.succ + "</b>/2";
+      $("#d1-kv").innerHTML =
+        "<span>当前状态</span><b>" + (S.up ? "up" : "down") + "</b>" +
+        "<span>通知策略</span><b>" + "翻转才发" + "</b>" +
+        "<span>下轮步进</span><b>" + "15s" + "</b>" +
+        "<span>并发上限</span><b>8</b>";
+      $("#d1-log").innerHTML = S.log.slice(-30).map((l) => '<span class="' + (l.cls || "") + '">' + esc(l.txt) + "</span>").join("\n");
+      $("#d1-log").scrollTop = 1e6;
+    }
+    $("#d1-fail").onclick = () => {
+      S.fail++; S.succ = 0; S.t += 30;
+      log("[t+" + S.t + "s] 拨测失败 → fail_streak=" + S.fail, S.up && S.fail >= FAIL_TH ? "bad" : "");
+      if (S.up && S.fail >= FAIL_TH) { S.up = false; S.lastFlip = S.t; log("[翻转] 连续 " + FAIL_TH + " 败 → DOWN，事件 + 通知（带原因）", "bad"); }
+      render();
+    };
+    $("#d1-ok").onclick = () => {
+      S.succ++; S.fail = 0; S.t += 30;
+      log("[t+" + S.t + "s] 拨测成功 → succ_streak=" + S.succ, !S.up && S.succ >= SUCC_TH ? "good" : "");
+      if (!S.up && S.succ >= SUCC_TH) {
+        const dur = S.t - S.lastFlip;
+        S.up = true;
+        log("[翻转] 连续 " + SUCC_TH + " 成 → UP，通知带持续时长：" + Math.round(dur / 60) + " 分钟", "good");
+      }
+      render();
+    };
+    $("#d1-reset").onclick = () => { Object.assign(S, { up: true, fail: 0, succ: 0, lastFlip: 0, t: 0, log: [] }); log("[初始] up · 独立 15s 步进循环，周期 30s"); render(); };
+    $("#d1-reset").onclick();
+  })();
+
+  /* ══ DEMO 02 · 健康分秤（rules.py health_score：权重 × 0.5^n）══ */
+  (() => {
+    const big = $("#d2-big");
+    if (!big) return;
+    const W = { login: [30, 12], container: [24, 8], disk: [24, 8], memory: [24, 8], cert: [18, 8], cpu: [10, 4], io: [6, 3] };
+    const NAMES = { login: "可疑登录", container: "容器退出", disk: "磁盘越限", memory: "内存越限", cert: "证书临期", cpu: "CPU 高", io: "IO 高" };
+    const S = { items: [] };
+    function score(items, linear) {
+      const seen = {};
+      let pen = 0;
+      items.forEach((it) => {
+        const w = W[it.type][it.sev === "crit" ? 0 : 1];
+        if (linear) pen += w;
+        else { const n = seen[it.type] || 0; seen[it.type] = n + 1; pen += w * Math.pow(0.5, n); }
+      });
+      return Math.max(0, Math.min(100, Math.round(100 - pen)));
+    }
+    function status(v) { return v >= 90 ? ["ok", "OK · HEALTHY"] : v >= 70 ? ["warn", "WARN · 需要关注"] : ["crit", "CRIT · 立即处理"]; }
+    function render() {
+      const v = score(S.items, false), lv = score(S.items, true);
+      const [cls, word] = status(v);
+      big.className = "hs-big " + cls;
+      big.textContent = v;
+      $("#d2-status").textContent = word;
+      $("#d2-add").innerHTML = Object.keys(W).map((t) => '<button class="ghost" data-t="' + t + '">+ ' + NAMES[t] + "</button>").join("");
+      $$("#d2-add button").forEach((b) => { b.onclick = () => { S.items.push({ type: b.dataset.t, sev: "warn" }); render(); }; });
+      $("#d2-list").innerHTML = S.items.length
+        ? S.items.map((it, i) => (i + 1) + ". " + NAMES[it.type] + " warn · 本条扣 <b>" + (W[it.type][1] * Math.pow(0.5, S.items.slice(0, i).filter((x) => x.type === it.type).length)).toFixed(2) + "</b>").join("\n")
+        : "（还没有发现——点上面的按钮往里加）";
+      // 曲线：往同一类型 cpu 连续添加 1..10 次的两条分数轨迹
+      const n = 10, pts1 = [], pts2 = [];
+      for (let k = 1; k <= n; k++) {
+        const arr = Array.from({ length: k }, () => ({ type: "cpu", sev: "warn" }));
+        pts1.push(score(arr, true)); pts2.push(score(arr, false));
+      }
+      const svg = $("#d2-svg");
+      const px = (i) => 24 + i * (472 / (n - 1)), py = (v) => 150 - (v / 100) * 130;
+      let path1 = pts1.map((v, i) => (i ? "L" : "M") + px(i) + " " + py(v)).join(" ");
+      let path2 = pts2.map((v, i) => (i ? "L" : "M") + px(i) + " " + py(v)).join(" ");
+      svg.innerHTML =
+        '<line x1="24" y1="150" x2="496" y2="150" stroke="var(--line-strong)"/><line x1="24" y1="150" x2="24" y2="14" stroke="var(--line-strong)"/>' +
+        '<text x="10" y="154" font-size="8" fill="var(--faint)" font-family="monospace">100</text>' +
+        '<text x="16" y="20" font-size="8" fill="var(--faint)" font-family="monospace">0</text>' +
+        '<path d="' + path1 + '" fill="none" stroke="var(--alarm)" stroke-width="2"/>' +
+        '<path d="' + path2 + '" fill="none" stroke="var(--rail)" stroke-width="2.4"/>' +
+        '<text x="480" y="' + (py(pts1[n - 1]) - 6) + '" font-size="9" fill="var(--alarm)" font-family="monospace" text-anchor="end">' + pts1[n - 1] + "</text>" +
+        '<text x="480" y="' + (py(pts2[n - 1]) + 14) + '" font-size="9" fill="var(--rail)" font-family="monospace" text-anchor="end">' + pts2[n - 1] + "</text>";
+      $("#d2-note").innerHTML = "对照曲线：往 <b>cpu</b>（warn 扣 4 分）连续堆 10 条同类告警——线性叠加砸到 <b>" + lv0() + "</b> 分，0.5ⁿ 衰减稳在 <b>" + score(Array.from({ length: 10 }, () => ({ type: "cpu", sev: "warn" })), false) + "</b> 分。分数回答「有几个问题」，不是「日志有多长」。";
+      function lv0() { return score(Array.from({ length: 10 }, () => ({ type: "cpu", sev: "warn" })), true); }
+    }
+    $("#d2-reset").onclick = () => { S.items = []; render(); };
+    render();
+  })();
+
+  /* ══ DEMO 03 · 根因卡生成器（analysis.py analyze_finding）══ */
+  (() => {
+    const types = $("#d3-types");
+    if (!types) return;
+    const T = {
+      disk: {
+        name: "磁盘越限", sev: "warn", chain: ["磁盘写入持续", "journal/日志堆积", "写入失败风险"],
+        root: "磁盘使用率 91% 越过阈值，主要占用来源以深挖输出为准",
+        cmd: "$ du -xh /var --max-depth=2 | sort -rh | head -5",
+        out: "42G\t/var/log\n38G\t/var/log/app\n4.1G\t/var/lib/docker\n2.3G\t/var/log/journal",
+        prop: "journalctl --vacuum-size=500M",
+        ai: "日志目录 /var/log 占 42G，其中 app 子目录 38G，与「journal 清理」提案的收益不匹配——建议先确认 app 日志轮转配置（此句为 AI 附加视角，可错）。"
+      },
+      login: {
+        name: "可疑登录", sev: "crit", chain: ["非常见来源登录成功", "凭据可能外泄", "横向移动风险"],
+        root: "来源 IP 185.220.101.34 以用户 root 登录成功，不在常见内网段",
+        cmd: "$ last -n 5",
+        out: "root     pts/1        185.220.101.34   Sat Sep  5 03:12   still logged in",
+        prop: "ufw insert 1 deny 185.220.101.34 && passwd root",
+        ai: "该网段属已知 Tor 出口段（外部知识），建议同时检查 authorized_keys 是否新增条目（此句为 AI 附加视角，可错）。"
+      },
+      memory: {
+        name: "内存越限", sev: "warn", chain: ["内存逼近 OOM 边界", "swap 压力", "进程被杀风险"],
+        root: "内存使用率 93% 越过阈值，占用大头以深挖输出为准",
+        cmd: "$ ps aux --sort=-%mem | head -3",
+        out: "root  812 91.3 88.2 1489204 1387712 ?  Ss  09:12  812:33 /usr/bin/python3 /opt/app/worker.py",
+        prop: null,
+        ai: "worker.py 累计 CPU 时间 812 小时且常驻 88% 内存，形态符合缓慢泄漏——与规则结论不冲突，但修复提案缺失（白名单无安全命令），需人工介入。"
+      },
+      service: {
+        name: "服务失败", sev: "crit", chain: ["systemd unit failed", "服务不可用", "上游连锁超时"],
+        root: "systemd 报告 unit nginx 处于 failed 状态",
+        cmd: "$ systemctl status nginx",
+        out: "Active: failed (Result: exit-code) since Sat 2026-09-05 03:14:11 UTC",
+        prop: "systemctl restart nginx",
+        ai: "失败时间点与一次证书续期窗口接近，重启前建议先 journalctl -u nginx -n 50 确认退出码来源（此句为 AI 附加视角，可错）。"
+      },
+    };
+    const S = { sel: "disk", ai: "on" };
+    function render() {
+      const c = T[S.sel];
+      types.innerHTML = Object.entries(T).map(([k, x]) =>
+        '<button class="rc-type" data-k="' + k + '" aria-pressed="' + (S.sel === k) + '"><b>' + x.name + ' <em style="' + (x.sev === "crit" ? "color:var(--alarm);border-color:var(--alarm)" : "color:var(--amber);border-color:var(--amber)") + '">' + x.sev + "</em></b><small>" + x.chain[0] + "</small></button>").join("");
+      $$(".rc-type", types).forEach((b) => { b.onclick = () => { S.sel = b.dataset.k; render(); }; });
+      const steps = S.ai === "off" ? "" :
+        '<span class="cmd">' + esc(c.cmd) + "</span>\n" + esc(c.out);
+      const aiHtml = S.ai === "on"
+        ? '<div class="rc-ai"><b>AI 叙事（附加视角）：</b>' + esc(c.ai) + "</div>"
+        : S.ai === "err"
+        ? '<div class="rc-ai err"><b>ai_error：</b>TimeoutError: 请求超时(20s)——事件已记录「AI 叙事失败（诊断继续，规则结论不受影响）」。<br/>root_cause 与提案不受影响。</div>'
+        : '<div class="rc-ai" style="opacity:.65"><b>ai_outbound = off：</b>LLM 未出网。卡片照常产出（正常态，非错误态）。</div>';
+      $("#d3-card").innerHTML =
+        '<div class="rc-chain">' + c.chain.map((s2) => "<span>" + esc(s2) + "</span>").join(' <i>→</i> ') + "</div>" +
+        '<div class="rc-root"><b>根因（规则事实）：</b>' + esc(c.root) + "</div>" +
+        (steps ? '<div class="rc-steps">' + steps + "</div>" : "") + aiHtml;
+      $("#d3-foot").innerHTML =
+        '<span class="conf' + (S.ai === "on" ? "" : " mid") + '">confidence: ' + (S.ai === "on" ? "高（有深挖步骤）" : "中（仅规则事实）") + "</span>" +
+        (c.prop ? '<span class="prop">提案：' + esc(c.prop) + "</span>" : '<span style="color:var(--amber)">宁可不给提案（memory 无白名单安全命令）</span>');
+    }
+    const modes = [["on", "AI 成功"], ["err", "AI 超时"], ["off", "AI 未启用"]];
+    const bar = document.createElement("div");
+    bar.className = "pm-btnrow";
+    bar.style.marginTop = "9px";
+    bar.innerHTML = modes.map((m) => '<button class="ghost" data-m="' + m[0] + '">' + m[1] + "</button>").join("");
+    types.after(bar);
+    $$("button", bar).forEach((b) => { b.onclick = () => { S.ai = b.dataset.m; render(); }; });
+    render();
+  })();
+
+  /* ══ DEMO 04 · 命令安检门（executor.py validate：逐段白名单）══ */
+  (() => {
+    const rulesEl = $("#d4-rules");
+    if (!rulesEl) return;
+    const RULES = [
+      { re: "^journalctl --vacuum-size=\d+[MG]$", risk: "低危", label: "清理 journal 日志" },
+      { re: "^find /var/log -name '\*\.gz' -mtime \+\d+ -delete$", risk: "中危", label: "删除过期压缩日志" },
+      { re: "^systemctl restart [a-z0-9@._-]+$", risk: "中危", label: "重启服务" },
+      { re: "^ufw insert 1 deny \d{1,3}(\.\d{1,3}){3}$", risk: "中危", label: "防火墙封禁 IP" },
+      { re: "^passwd [a-z_][a-z0-9_-]{0,30}$", risk: "高危", label: "轮换口令" },
+    ].map((r) => ({ ...r, p: new RegExp(r.re) }));
+    const CASES = [
+      "journalctl --vacuum-size=500M",
+      "systemctl restart nginx",
+      "ufw insert 1 deny 185.220.101.34 && passwd root",
+      "journalctl --vacuum-size=500M && rm -rf /",
+      "systemctl restart nginx; shutdown now",
+    ];
+    const RISK = { "低危": "lo", "中危": "mid", "高危": "hi" };
+    const ORDER = ["低危", "中危", "高危"];
+    rulesEl.innerHTML = RULES.map((r) => '<div class="gw-rule"><b>' + esc(r.label) + '</b><em>' + r.risk + "</em> · " + esc(r.re) + "</div>").join("");
+    function validate(cmd) {
+      const segs = cmd.split("&&").map((x) => x.trim()).filter(Boolean);
+      if (!segs.length) return { ok: false, risk: "低危", segs: [], refused: "空命令" };
+      let risk = "低危"; const out = []; let bad = null;
+      for (const seg of segs) {
+        let hit = null;
+        for (const r of RULES) { if (r.p.test(seg)) { hit = r; break; } }
+        if (hit) { risk = ORDER[Math.max(ORDER.indexOf(risk), ORDER.indexOf(hit.risk))]; out.push({ seg, ok: true, hit }); }
+        else { out.push({ seg, ok: false }); if (!bad) bad = seg; }
+      }
+      return bad ? { ok: false, risk, segs: out, refused: "白名单外命令: " + bad } : { ok: true, risk, segs: out, refused: null };
+    }
+    function render(cmd) {
+      const v = validate(cmd);
+      $("#d4-verdict").className = "gw-verdict " + (v.ok ? "allow" : "deny");
+      $("#d4-verdict").innerHTML = (v.ok ? "允许执行" : "拒绝") + " <small>· risk=" + v.risk + (v.ok ? " · 下一步：propose_exec 开关 + 20s 超时 + 审计" : "") + "</small>";
+      $("#d4-segs").innerHTML = v.segs.map((s) =>
+        '<div class="gw-seg ' + (s.ok ? "ok" : "bad") + '"><span class="mk">' + (s.ok ? "✓" : "✗") + '</span><code>' + esc(s.seg) + "</code><span class='risk'>" +
+        (s.ok ? "<em class='" + RISK[s.hit.risk] + "'>" + s.hit.risk + " · " + esc(s.hit.label) + "</em>" : "<em class='hi'>白名单外</em>") + "</span></div>").join("");
+      $("#d4-audit").innerHTML = "proposal_runs 审计行（一切尝试都留痕）\n" +
+        "{ mode: \"mock\", command: \"" + esc(cmd.slice(0, 46)) + (cmd.length > 46 ? "…" : "") + "\", risk: \"" + v.risk + "\", status: \"" + (v.ok ? "ok" : "refused") + "\", output: " +
+        (v.ok ? "\"…\"" : "\"" + esc((v.refused || "").slice(0, 30)) + "\"") + ", duration_ms: … }";
+    }
+    $("#d4-cases").innerHTML = CASES.map((c, i) => '<button class="ghost" data-i="' + i + '">' + esc(c.length > 26 ? c.slice(0, 26) + "…" : c) + "</button>").join("");
+    $$("#d4-cases button").forEach((b) => { b.onclick = () => { $("#d4-cmd").value = CASES[+b.dataset.i]; render(CASES[+b.dataset.i]); }; });
+    $("#d4-check").onclick = () => render($("#d4-cmd").value);
+    $("#d4-cmd").addEventListener("keydown", (e) => { if (e.key === "Enter") render($("#d4-cmd").value); });
+    render(CASES[0]);
+  })();
+})();
+
+</script>
+</body>
+</html>

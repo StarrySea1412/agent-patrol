@@ -1,0 +1,66 @@
+<section class="chapter" id="ch2">
+  <div class="ch-head">
+    <div class="ch-num"><b>02</b>CHAPTER<br/>00:01</div>
+    <div class="ch-title">
+      <h2>告警也会发抖</h2>
+      <p>磁盘在 85% 警戒线上反复横跳，告警就跟着一惊一乍——两剂老药：滞后阈值与指数衰减</p>
+    </div>
+  </div>
+  <div class="ch-body">
+    <p class="lede">监控系统的第一号慢性病叫 <strong>flapping</strong>：指标贴着告警线抖动，告警开了关、关了开，通知轰炸比故障本身烦人。这台 Agent 的解药是从 Netdata 学来的老办法，写死在代码注释里（rules.py · L20）：</p>
+    <div class="pull">滞后恢复阈值（Netdata CLEAR 模式）：触发用 warn/crit 阈值，<b>恢复要求指标回落到更低的 clear 阈值之下</b>——防止指标在告警线附近抖动导致告警反复打翻。</div>
+    <h3>进出分开两条线</h3>
+    <p>以磁盘为例：85% 触发警告，但解除不是「回到 84.9%」，而是要<strong>回落到 80% 以下</strong>。中间那 5 个点是一条缓冲带，指标在带内怎么抖都不翻转。四类主指标各有一条 clear 线（disk 80 / memory 80 / cpu 75 / load 6.0），且代码里有个贴心的联动（rules.py · <code>clear_thresholds()</code>）：</p>
+    <div class="code"><div class="code-bar"><span>rules.py · clear_thresholds() · L62</span><b>恢复线跟随告警线</b></div>
+<pre><span class="k">def</span> <span class="f">clear_thresholds</span>() -> dict:
+    <span class="s">"""恢复阈值 = min(用户同主阈值 - 5, 内置 clear 值)，用户调高告警线时恢复线跟随。"""</span>
+    t = <span class="f">dict</span>(CLEAR_THRESHOLDS)
+    T = <span class="f">thresholds</span>()
+    <span class="k">for</span> k_main, k_clear <span class="k">in</span> ((<span class="s">"disk_warn"</span>, <span class="s">"disk"</span>), (<span class="s">"mem_warn"</span>, <span class="s">"memory"</span>),
+                            (<span class="s">"cpu_warn"</span>, <span class="s">"cpu"</span>), (<span class="s">"load_warn"</span>, <span class="s">"load"</span>)):
+        t[k_clear] = <span class="f">min</span>(t[k_clear], T[k_main] - <span class="n">5</span>)
+    <span class="k">return</span> t</pre></div>
+    <p>把告警线从 85 调到 92，恢复线自动变成 min(80, 87) = 80——<em>用户调告警线时不会无意中把缓冲带调没</em>。一个 min 函数，省掉一类「我调了阈值怎么告警还是乱翻」的支持问题。而 evaluate() 里恢复的判定也据此写成：磁盘告警处于打开状态时，必须 <code>disk &lt; C["disk"]</code> 才放行解除。</p>
+
+    <h3>分数的第二次防抖：0.5ⁿ 衰减</h3>
+    <p>告警翻转让通知遭殃，分数堆积则让健康分遭殃——十条「磁盘 86%」的 warn 按线性叠加就是 −80 分，直接砸穿。健康分的公式（rules.py · <code>health_score()</code> 注释）：</p>
+    <div class="pull">健康分 = 100 − Σ(类型权重 × <b>0.5^同类次数</b>)，下限 0。<br/>权重区分发现类型的业务影响（SCORE_WEIGHTS：安全/容量重、性能/温度轻）；同类重复发现指数衰减——<b>同型告警堆积不再无脑线性叠加砸穿分数</b>。</div>
+    <div class="tablewrap"><table>
+      <thead><tr><th>发现类型</th><th>crit / warn 扣分</th><th>业务理由</th><th>第 3 次同类 warn 实扣</th></tr></thead>
+      <tbody>
+        <tr><td><code>login</code> 可疑登录</td><td class="num">30 / 12</td><td>安全事件最重</td><td class="num">3.0</td></tr>
+        <tr><td><code>container</code> 容器退出</td><td class="num">24 / 8</td><td>可用性受损</td><td class="num">2.0</td></tr>
+        <tr><td><code>disk</code> / <code>memory</code></td><td class="num">24 / 8</td><td>容量风险</td><td class="num">2.0</td></tr>
+        <tr><td><code>cert</code> 证书临期</td><td class="num">18 / 8</td><td>有窗口期的事件</td><td class="num">2.0</td></tr>
+        <tr><td><code>cpu</code> / <code>load</code></td><td class="num">10 / 4</td><td>性能噪声类最轻</td><td class="num">1.0</td></tr>
+        <tr><td><code>io</code> / <code>temp</code></td><td class="num">6 / 3</td><td>信号价值最低</td><td class="num">0.75</td></tr>
+      </tbody>
+    </table></div>
+    <p>注意「第 3 次实扣」那列：8 × 0.25 = 2.0——同一条告警刷屏十次，边际惩罚趋近于零。<strong>分数反映的是「这台机器有几个问题」，不是「告警日志有多长」。</strong></p>
+
+    <div class="demo" id="d2">
+      <div class="demo-head"><span class="demo-tag">DEMO 02 · 健康分秤</span><span class="demo-title">0.5ⁿ vs 线性叠加<span class="hint">加发现，看两条曲线分岔</span></span></div>
+      <div class="demo-body">
+        <div class="hs-wrap">
+          <div class="hs-score">
+            <div class="hs-big" id="d2-big">100</div>
+            <div class="hs-status" id="d2-status">OK · HEALTHY</div>
+            <div class="hs-add" id="d2-add"></div>
+            <div class="hs-list" id="d2-list"></div>
+            <button class="ghost" id="d2-reset" style="margin-top:9px">清空</button>
+          </div>
+          <div>
+            <div class="hs-chart"><svg class="hs-svg" id="d2-svg" viewBox="0 0 520 170" preserveAspectRatio="none"></svg>
+              <div class="hs-legend"><span class="a">线性叠加（对照）</span><span class="b">0.5ⁿ 衰减（本标本）</span></div>
+            </div>
+            <div class="hs-switch"><label class="switch"><input type="checkbox" id="d2-lin"/><span>显示线性叠加对照</span></label></div>
+            <div class="hs-note" id="d2-note"></div>
+          </div>
+        </div>
+      </div>
+      <div class="demo-foot">公式与权重照抄 <b>health_score()</b> 与 <b>SCORE_WEIGHTS</b>；status_of：≥90 ok / ≥70 warn / 其余 crit。线性叠加为对照模型（每次全扣），非标本行为。</div>
+    </div>
+
+    <p>滞后治「翻转抖动」，衰减治「分数堆积」——两剂药都不新鲜，新鲜的是它们被当成一等公民写进注释、算给读者看。监控系统的可信度往往就藏在这种不起眼的减法里。</p>
+  </div>
+</section>
