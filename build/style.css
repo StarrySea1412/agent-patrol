@@ -342,3 +342,8 @@ input[type=text]:focus,select:focus{outline:2px solid var(--signal);outline-offs
 @media (max-width:980px){
   .pm-wrap,.hs-wrap,.rc-wrap,.gw-wrap{grid-template-columns:1fr}
 }
+@media (max-width:620px){
+  .gw-seg{grid-template-columns:22px 1fr}
+  .gw-seg .risk{grid-column:2;text-align:left;white-space:normal}
+  .rc-foot{flex-direction:column;align-items:flex-start}
+}

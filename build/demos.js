@@ -104,8 +104,8 @@
       let path2 = pts2.map((v, i) => (i ? "L" : "M") + px(i) + " " + py(v)).join(" ");
       svg.innerHTML =
         '<line x1="24" y1="150" x2="496" y2="150" stroke="var(--line-strong)"/><line x1="24" y1="150" x2="24" y2="14" stroke="var(--line-strong)"/>' +
-        '<text x="10" y="154" font-size="8" fill="var(--faint)" font-family="monospace">100</text>' +
-        '<text x="16" y="20" font-size="8" fill="var(--faint)" font-family="monospace">0</text>' +
+        '<text x="10" y="24" font-size="8" fill="var(--faint)" font-family="monospace">100</text>' +
+        '<text x="14" y="154" font-size="8" fill="var(--faint)" font-family="monospace">0</text>' +
         '<path d="' + path1 + '" fill="none" stroke="var(--alarm)" stroke-width="2"/>' +
         '<path d="' + path2 + '" fill="none" stroke="var(--rail)" stroke-width="2.4"/>' +
         '<text x="480" y="' + (py(pts1[n - 1]) - 6) + '" font-size="9" fill="var(--alarm)" font-family="monospace" text-anchor="end">' + pts1[n - 1] + "</text>" +
@@ -191,12 +191,12 @@
     const rulesEl = $("#d4-rules");
     if (!rulesEl) return;
     const RULES = [
-      { re: "^journalctl --vacuum-size=\d+[MG]$", risk: "低危", label: "清理 journal 日志" },
-      { re: "^find /var/log -name '\*\.gz' -mtime \+\d+ -delete$", risk: "中危", label: "删除过期压缩日志" },
-      { re: "^systemctl restart [a-z0-9@._-]+$", risk: "中危", label: "重启服务" },
-      { re: "^ufw insert 1 deny \d{1,3}(\.\d{1,3}){3}$", risk: "中危", label: "防火墙封禁 IP" },
-      { re: "^passwd [a-z_][a-z0-9_-]{0,30}$", risk: "高危", label: "轮换口令" },
-    ].map((r) => ({ ...r, p: new RegExp(r.re) }));
+      { re: /^journalctl --vacuum-size=\d+[MG]$/, risk: "低危", label: "清理 journal 日志" },
+      { re: /^find \/var\/log -name '\*\.gz' -mtime \+\d+ -delete$/, risk: "中危", label: "删除过期压缩日志" },
+      { re: /^systemctl restart [a-z0-9@._-]+$/, risk: "中危", label: "重启服务" },
+      { re: /^ufw insert 1 deny \d{1,3}(\.\d{1,3}){3}$/, risk: "中危", label: "防火墙封禁 IP" },
+      { re: /^passwd [a-z_][a-z0-9_-]{0,30}$/, risk: "高危", label: "轮换口令" },
+    ].map((r) => ({ re: r.re.source, risk: r.risk, label: r.label, p: r.re }));
     const CASES = [
       "journalctl --vacuum-size=500M",
       "systemctl restart nginx",
