@@ -13,7 +13,7 @@
 <meta property="og:description" content="模型挂了之后发生什么：六类错误两种药、重试包在换人里、熔断冷却 60 秒、以及「不许静默降级」背后的价值观。"/>
 <meta property="og:type" content="article"/>
 <meta property="og:image" content="assets/art/hero.webp"/>
-<title>给 Agent 配一台总机 · 造物手记 VOL.10</title>
+<title>给 Agent 配一台总机 · 造物手记 <a href="https://starrysea1412.github.io/agent-switchboard/" target="_blank" rel="noopener" style="text-decoration:underline dotted; text-underline-offset:3px">VOL.10</a></title>
 <style>
 /* 《住进机房的 Agent》· 造物手记 VOL.12
    机架走线图：机房纸、石墨蓝黑、安全橙、LED 绿 —— 一面挂满巡检面板的机架立面。 */
@@ -483,7 +483,7 @@ input[type=text]:focus,select:focus{outline:2px solid var(--signal);outline-offs
     <p>AI 在这台机器里要过三道门才说得上话：<strong>第一道，ai_outbound 开关</strong>——<code>_llm_enabled()</code> 查设置，默认关着，LLM 根本不出网；<strong>第二道，匿名化</strong>——主机名和 IP 先换成 RFC 5737 文档段占位符（第五章细拆）；<strong>第三道，位置</strong>——就算三样齐了，AI 的输出也只是卡片上的 <code>ai_narration</code> 字段，和 <code>root_cause</code> 并排放着，但 code 里的注释把它钉死了：</p>
     <div class="pull">规则引擎结论永远为准；AI 叙事仅作为附加视角单列，<b>绝不覆盖 root_cause</b>。</div>
     <p>第五行那格「决定权：无」就是这个意思。不是 AI 不会说话，是<em>说话这件事被安排在事实之后</em>。</p>
-    <div class="note"><b>系列对照：</b>VOL.06《给 Agent 打分》立过「判分器也要被评测」，VOL.11 立过「提示词是意见，工具是法律」。这一篇再进一格：<strong>叙事和事实是两种权限</strong>——让最会说话的组件只拿叙事权限，是架构级的防幻觉。</div>
+    <div class="note"><b>系列对照：</b><a href="https://starrysea1412.github.io/agent-eval/" target="_blank" rel="noopener" style="text-decoration:underline dotted;text-underline-offset:3px">VOL.06《给 Agent 打分》</a>立过「判分器也要被评测」，<a href="https://starrysea1412.github.io/agent-orchestrator/" target="_blank" rel="noopener" style="text-decoration:underline dotted;text-underline-offset:3px">VOL.11</a> 立过「提示词是意见，工具是法律」。这一篇再进一格：<strong>叙事和事实是两种权限</strong>——让最会说话的组件只拿叙事权限，是架构级的防幻觉。</div>
     <p>分工定了，接下来看规则引擎自己怎么站得住：阈值会抖、分数会砸穿，第二章讲两剂解药。</p>
   </div>
 </section>
@@ -629,7 +629,7 @@ input[type=text]:focus,select:focus{outline:2px solid var(--signal);outline-offs
     <p>最后是这个模块最清醒的一个决定，写在文件头（原文）：</p>
     <div class="pull">设计取舍：拨测失败不进 findings（那是主机指标域），只落 events + probe_log；面板独立「拨测」页展示，<b>Fleet 健康分不被拨测污染</b>。</div>
     <p>想想反例：把拨测失败也按 warn 塞进健康分，那么一次 DNS 解析器抽风会把「机器本身很健康」的事实搅浑——分数从此说不清自己是什么。域隔离让主机域和服务域各自记账、各自告警，<em>分数的语义于是稳定</em>。这也是对 ch2 衰减公式的补充：衰减管同域堆积，隔离管跨域混淆。</p>
-    <div class="note"><b>调度细节：</b>拨测有独立的 15s 步进循环，周期默认 30s，与 60s 主机巡检解耦；<code>DIAL_SEMA = Semaphore(8)</code> 防一串 10s 超时目标拖住整轮；<code>gather(return_exceptions=True)</code> 保证单目标异常不拖垮同轮其他目标——并发纪律与 VOL.10 的「单模型重试不惊动全链」同源。</div>
+    <div class="note"><b>调度细节：</b>拨测有独立的 15s 步进循环，周期默认 30s，与 60s 主机巡检解耦；<code>DIAL_SEMA = Semaphore(8)</code> 防一串 10s 超时目标拖住整轮；<code>gather(return_exceptions=True)</code> 保证单目标异常不拖垮同轮其他目标——并发纪律与 <a href="https://starrysea1412.github.io/agent-switchboard/" target="_blank" rel="noopener" style="text-decoration:underline dotted;text-underline-offset:3px">VOL.10</a> 的「单模型重试不惊动全链」同源。</div>
   </div>
 </section>
 
@@ -720,7 +720,7 @@ input[type=text]:focus,select:focus{outline:2px solid var(--signal);outline-offs
     <h3>为何这套降级是可信的</h3>
     <p>把 AI 三态放进 ch1 的决定权表里看：规则（事实）→ 深挖（证据）→ 提案（白名单）三环全部不依赖 AI，AI 只在叙事位。于是失败的爆炸半径被结构性限制住了——它挂它的，卡片照出、分数照算、提案照批。<strong>这不是「AI 失败重试策略」，是「AI 失败不影响任何事」的架构保证。</strong></p>
     <p>对比一下常见的反面教材：AI 分析是主流程的一环，AI 挂了整个诊断超时，于是人们给 AI 加重试、加缓存、加降级开关——每一步都在给一个本不该居于要害的组件加固。<em>正确的顺序是先把要害挪走，再谈加固。</em></p>
-    <div class="note"><b>与 VOL.10 呼应：</b>总机篇的「宁可明示模拟，不许静默降级」在这里是同一件事的运维版：宁可没有叙事，不许叙事顶替事实。两台机器隔着三个篇章，说的是同一条伦理。</div>
+    <div class="note"><b>与 <a href="https://starrysea1412.github.io/agent-switchboard/" target="_blank" rel="noopener" style="text-decoration:underline dotted;text-underline-offset:3px">VOL.10</a> 呼应：</b>总机篇的「宁可明示模拟，不许静默降级」在这里是同一件事的运维版：宁可没有叙事，不许叙事顶替事实。两台机器隔着三个篇章，说的是同一条伦理。</div>
     <p>诊断卡出完了，最后一步是动手修。而「动手」在这台机器里是被重重围住的一座城——下一章进这道门。</p>
   </div>
 </section>
@@ -812,7 +812,7 @@ TIMEOUT = <span class="n">20</span>  <span class="c"># 秒</span></pre></div>
       <div class="rule"><b>PATROL 02 · 老办法先于新名词</b><p>Netdata 的 CLEAR 滞后阈值、Gatus 的双阈值防抖、0.5ⁿ 衰减——这些都不是新发明，但被认真写成一等公民：注释里讲清楚为什么，公式摊开算给读者看。监控系统的可信度是减法堆出来的。</p></div>
       <div class="rule"><b>PATROL 03 · 动手是另一件事</b><p>批准只是记录；执行有独立开关（默认 off）；五条正则白名单逐段整体匹配；没有安全解法就宁可不给提案；连被拒都进审计表。修复链路的每一步都比上一步难，方向永远朝向人。</p></div>
     </div>
-    <p>至此，造物手记的 Agent 组织学补上了最后一块：VOL.10 让 Agent 学会挑模型，VOL.11 让 Agent 学会指挥 Agent，这一篇让 Agent 学会<strong>独自值守</strong>——独自值守的全部要领，不是多聪明，而是在每个可以自作主张的岔路口，都提前修好一道闸。</p>
+    <p>至此，造物手记的 Agent 组织学补上了最后一块：<a href="https://starrysea1412.github.io/agent-switchboard/" target="_blank" rel="noopener" style="text-decoration:underline dotted;text-underline-offset:3px">VOL.10</a> 让 Agent 学会挑模型，<a href="https://starrysea1412.github.io/agent-orchestrator/" target="_blank" rel="noopener" style="text-decoration:underline dotted;text-underline-offset:3px">VOL.11</a> 让 Agent 学会指挥 Agent，这一篇让 Agent 学会<strong>独自值守</strong>——独自值守的全部要领，不是多聪明，而是在每个可以自作主张的岔路口，都提前修好一道闸。</p>
     <div class="pull">巡检 Agent 的最高美德不是发现得快，<b>而是它自作主张的能力边界，与它值班室的墙一样清楚。</b></div>
   </div>
 </section>
@@ -1086,5 +1086,5 @@ TIMEOUT = <span class="n">20</span>  <span class="c"># 秒</span></pre></div>
 })();
 
 </script>
-</body>
+<div class="series-nav" style="display:flex;gap:14px;flex-wrap:wrap;justify-content:center;align-items:baseline;font-family:var(--mono,Consolas,monospace);font-size:11px;letter-spacing:1px;color:var(--muted,#8a959c);margin:26px 0 0;padding:16px 0 0;border-top:1px solid var(--line,#d8d8cc)"><a href="https://starrysea1412.github.io/agent-orchestrator/" style="color:inherit">← VOL.11 当 Agent 指挥 Agent</a><a href="https://starrysea1412.github.io/makers-notebook/" style="color:var(--orange,var(--steel,#3e5c6e));font-weight:700">☰ 全系列目录</a><a href="https://starrysea1412.github.io/retouch-story/" style="color:inherit">VOL.13 修一张照片 →</a></div></body>
 </html>
